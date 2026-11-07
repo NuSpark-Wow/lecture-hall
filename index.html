@@ -216,7 +216,7 @@ button{font-family:inherit;cursor:pointer}
     <h3>Keep learning</h3>
     <div class="big-btns">
       <button class="bigbtn next-btn hide" id="nextPart">▶ Next part</button>
-      <button class="bigbtn ask-about" id="askAbout">🎤 Ask about this</button>
+      <button class="bigbtn ask-about" id="askAbout">💬 Ask about this</button>
       <button class="bigbtn more" id="goDeeper">➕ Go deeper</button>
       <button class="bigbtn course-btn" id="makeCourse">📚 Make it a course</button>
     </div>
@@ -235,6 +235,7 @@ const NS = "http://www.w3.org/2000/svg";
 const STARTERS = ["How does inflation work?","Why did the Roman Empire fall?","How do vaccines train the immune system?","What causes the northern lights?","How does a jet engine work?","How do interest rates affect mortgages?","How does GPS know where you are?","What is quantum entanglement?","Why do we dream?","How did the printing press change the world?"];
 
 let lesson = null, busy = false, followUp = "", reqId = 0, lastQuestion = "", figs = [];
+let narrStarted = false, narrTimer = 0, pStarts = [], lastCi = -1, pendingMore = null, audioP = null, silentMode = false;
 let groups = [], shown = 0, manual = false, lastProgress = 0, boardStart = 0, boardOff = false, lastReveal = 0, pumpTimer = 0, liveBoard = false, boardDone = true;
 let words = [], speech = "";
 let ctx = null, srcNode = null, lastAudio = null, raf = 0, voiceOff = false, speaking = false;
@@ -308,25 +309,37 @@ if (!SR) {
   rec.onerror = e => { if (e.error === "not-allowed" || e.error === "service-not-allowed") $("hint").textContent = "Microphone is blocked. Allow it in your browser, or type instead."; };
   $("mic").onclick = () => { unlock(); if (listening) { rec.stop(); return; } $("q").value = ""; $("go").classList.remove("ready"); startListening(); };
 }
-$("go").onclick = () => { unlock(); if (course && !course.locked) endCourse(); ask(); };
-$("q").addEventListener("keydown", e => { if (e.key === "Enter") { unlock(); if (course && !course.locked) endCourse(); ask(); } });
+// If "Go deeper" is waiting, Ask uses what they typed or said (or goes deeper on everything when the box is empty)
+function goAsk(){
+  unlock();
+  if (course && !course.locked) endCourse();
+  if (pendingMore && !busy) {
+    const pm = pendingMore; pendingMore = null;
+    const typed = $("q").value.trim();
+    ask(typed || "Go deeper on " + pm.title, pm.title, { more: true, prev: pm.prev });
+    return;
+  }
+  ask();
+}
+$("go").onclick = goAsk;
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") goAsk(); });
 
 /* ---------- asking: words and figures are fetched at the same time ---------- */
 const norm = s => s.toLowerCase().replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
 async function fetchPart(part, question, context, opts){
   let r;
-  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&v=5&q=${encodeURIComponent(norm(question))}`);
+  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&v=6&q=${encodeURIComponent(norm(question))}`);
   else r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" },
     body: JSON.stringify({ part, question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
   const d = await r.json().catch(() => null);
   return { ok: r.ok, status: r.status, d };
 }
 // Reads the figures as they stream in: one finished figure per line, shown right away.
-async function streamBoard(question, context, opts, onFig){
+async function streamBoard(question, context, opts, a, onFig){
   let r;
-  if (!context && !opts.more) r = await fetch(`/api/ask?part=board&depth=${depth}&v=5&q=${encodeURIComponent(norm(question))}`);
+  if (!context && !opts.more) r = await fetch(`/api/ask?part=board&depth=${depth}&v=6&q=${encodeURIComponent(norm(question))}&a=${encodeURIComponent(a)}`);
   else r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" },
-    body: JSON.stringify({ part: "board", question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
+    body: JSON.stringify({ part: "board", question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "", a }) });
   if (!r.ok) throw new Error("H" + r.status);
   let n = 0, buf = "";
   const handle = line => {
@@ -357,7 +370,30 @@ function addFig(f){
   g.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
   $("svg").appendChild(g); groups.push(g);
   $("thinking").classList.remove("on");
-  updateCtrls(); pump();
+  updateCtrls();
+  if (silentMode) { pump(); return; }              // shared link: nobody is talking, so flip on a timer
+  if (!narrStarted) { if (!shown) showFigure(0); startNarration(); }
+  else syncBoard(lastCi);
+}
+// The lecture waits for Fig. 1, then each figure appears when the professor reaches its section
+function startNarration(){
+  if (narrStarted || silentMode) return;
+  narrStarted = true; clearTimeout(narrTimer);
+  const my = reqId;
+  (audioP || Promise.resolve(null)).then(a => {
+    if (my !== reqId) return;
+    if (a) playBuffer(a); else browserVoice(speech);
+  });
+}
+function paraAt(ci){
+  if (ci === Infinity) return Infinity;
+  let p = 0; for (let i = 0; i < pStarts.length; i++) if (pStarts[i] <= ci) p = i;
+  return p;
+}
+function syncBoard(ci){
+  if (manual || boardOff || !liveBoard || silentMode || !groups.length) return;
+  const want = Math.min(paraAt(ci), groups.length - 1);
+  if (want > shown - 1) showFigure(want);
 }
 function pump(){
   clearTimeout(pumpTimer);
@@ -374,23 +410,17 @@ async function ask(text, context, opts){
   followUp = "";
   const question = (text || $("q").value).trim();
   if (!question || busy) return;
+  if (!opts.more) pendingMore = null;
   if (text) $("q").value = text;
   const my = ++reqId;
   busy = true; $("go").disabled = true; $("go").classList.remove("ready");
   stopVoice(); $("thinkText").textContent = "Thinking..."; $("thinking").classList.add("on");
   $("hint").textContent = "Preparing your lecture…";
 
-  // figures start right away and appear one by one as each is ready
-  boardOff = false; lastReveal = 0; clearTimeout(pumpTimer); figs = [];
+  // the lecture text comes first; then each section gets its own figure
+  boardOff = false; lastReveal = 0; clearTimeout(pumpTimer); clearTimeout(narrTimer); figs = [];
+  narrStarted = false; lastCi = -1; audioP = null; silentMode = !!opts.silent;
   buildBoard([]); liveBoard = true; boardDone = false;
-  const boardP = (async () => {
-    let total = 0;
-    for (let a = 0; a < 2 && total === 0; a++) {
-      try { total += await streamBoard(question, context, opts, f => { if (my === reqId && !boardOff) addFig(f); }); }
-      catch(e) {}
-    }
-    return total;
-  })();
 
   let data = null, reason = "N0";
   for (let attempt = 0; attempt < 2 && !data; attempt++) {
@@ -420,12 +450,21 @@ async function ask(text, context, opts){
   track("lecture", { topic: String(data.title || "").slice(0, 80), depth, type: data.type, course: course ? "yes" : "no" });
 
   if (data.type !== "lecture") { boardOff = true; $("thinking").classList.remove("on"); return; }
-  if (!groups.length) $("thinkText").textContent = "Drawing the figures...";
-  const total = await boardP;
+  $("thinkText").textContent = "Drawing Fig. 1..."; $("thinking").classList.add("on");
+  if (!silentMode) narrTimer = setTimeout(startNarration, 15000);   // safety valve if a figure is slow
+  const parts = (data.answer || []).map(x => typeof x === "string" ? { heading: "", text: x } : x);
+  const a = parts.map(x => ((x.heading ? x.heading + ": " : "") + (x.text || "")).trim()).filter(Boolean).slice(0, 5).map(x => x.slice(0, 900)).join("\n");
+  let total = 0;
+  for (let k = 0; k < 2 && total === 0 && my === reqId; k++) {
+    try { total += await streamBoard(question, context, opts, a, f => { if (my === reqId && !boardOff) addFig(f); }); }
+    catch(e) {}
+  }
   if (my !== reqId) return;
   boardDone = true; $("thinking").classList.remove("on");
   if (!total && !groups.length) { boardOff = true; figs = [{ title: "", caption: "", svg: blankCard() }]; buildBoard(figs); showFigure(0); }
   else if (shown > 0) setCaption(shown - 1);
+  startNarration();
+  syncBoard(lastCi);
 }
 
 /* ---------- render ---------- */
@@ -434,8 +473,9 @@ function render(opts){
   $("title").textContent = L.title || "Today's lecture";
   const parts = (L.answer || []).map(a => typeof a === "string" ? { heading: "", text: a } : a);
   speech = parts.map(a => a.text).join(" ");
-  words = []; let offset = 0; const read = $("read"); read.innerHTML = "";
+  words = []; let offset = 0; const read = $("read"); read.innerHTML = ""; pStarts = [];
   parts.forEach(a => {
+    pStarts.push(offset);
     if (a.heading) { const h = document.createElement("h4"); h.textContent = a.heading; read.appendChild(h); }
     const el = document.createElement("p");
     a.text.replace(/\S+|\s+/g, (tok, i) => {
@@ -463,15 +503,19 @@ function render(opts){
     const row = $("deeper"); row.innerHTML = "";
     (L.deeper || []).slice(0, 3).forEach(q => { const b = document.createElement("button"); b.className = "chip"; b.textContent = q; b.onclick = () => { unlock(); ask(q, L.title); window.scrollTo({ top: 0, behavior: "smooth" }); }; row.appendChild(b); });
     document.querySelector(".deeper .sub").classList.toggle("hide", !row.children.length);
-    $("goDeeper").onclick = () => { unlock(); ask("Go deeper on " + L.title, L.title, { more: true, prev: speech }); window.scrollTo({ top: 0, behavior: "smooth" }); };
-    $("askAbout").onclick = () => { unlock(); followUp = L.title; $("q").value = ""; window.scrollTo({ top: 0, behavior: "smooth" }); $("hint").textContent = "What would you like to know about " + L.title + "?"; startListening(); };
+    const prevSpeech = speech;
+    const readyBox = hintText => { $("q").value = ""; $("go").classList.add("ready"); $("hint").textContent = hintText; $("q").focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "smooth" }); };
+    $("goDeeper").onclick = () => { unlock(); followUp = ""; pendingMore = { title: L.title, prev: prevSpeech }; readyBox("Which part of " + L.title + " should we dig into? Type it or tap the mic. Or just tap Ask to go deeper on all of it."); };
+    $("askAbout").onclick = () => { unlock(); pendingMore = null; followUp = L.title; readyBox("What would you like to know about " + L.title + "? Type your question or tap the mic to say it."); };
     $("makeCourse").onclick = () => { unlock(); startCourse(L.title); };
     $("makeCourse").classList.toggle("hide", !!course);
     $("nextPart").classList.toggle("hide", !(course && course.idx < course.parts.length - 1));
     $("deepCard").classList.remove("hide");
   }
   renderCourse();
-  if (!(opts && opts.silent)) speak(); else { $("again").textContent = "🔊 Hear it"; }
+  if (opts && opts.silent) { $("again").textContent = "🔊 Hear it"; }
+  else if (!isLec) speak();
+  else audioP = prepareAudio();   // fetch the voice now so it's ready when Fig. 1 lands
 }
 
 function blankCard(){
@@ -642,7 +686,7 @@ function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = sh
 $("next").onclick = () => { manual = true; flipStopped = true; revealNext(); };
 $("prev").onclick = () => { manual = true; flipStopped = true; if (shown > 1) showFigure(shown - 2); };
 $("replay").onclick = () => { manual = true; flipStopped = true; if (shown > 0) showFigure(shown - 1); };
-function onProgress(f){ lastProgress = Math.max(lastProgress, f); }
+function onProgress(f){ lastProgress = Math.max(lastProgress, f); if (f >= 1) { lastCi = Infinity; syncBoard(Infinity); } }
 // after the talking is done, flip through the figures on a timer (stops if the reader takes over)
 function autoFlip(){
   const mine = groups;
@@ -656,6 +700,7 @@ function highlight(ci){
   let k = -1;
   for (let i = 0; i < words.length; i++) { if (words[i].start <= ci) k = i; else break; }
   words.forEach((w, i) => { w.el.classList.toggle("on", i === k); w.el.classList.toggle("done", i < k); });
+  if (ci > lastCi) { lastCi = ci; syncBoard(ci); }
 }
 function clearHighlight(){ words.forEach(w => w.el.classList.remove("on","done")); $("read").classList.remove("speaking"); }
 function setSpeaking(on){ speaking = on; $("read").classList.toggle("speaking", on); $("stop").classList.toggle("hide", !on); $("again").classList.toggle("hide", on); if (!on) $("again").textContent = "🔊 Hear it again"; }
@@ -672,6 +717,12 @@ $("again").onclick = () => { unlock(); if (lastAudio) playBuffer(lastAudio); els
 
 async function speak(){
   if (!speech) return;
+  const a = await prepareAudio();
+  if (a) playBuffer(a); else browserVoice(speech);
+}
+// Gets the recorded-voice audio (or null, meaning use the browser's voice)
+async function prepareAudio(){
+  if (!speech) return null;
   lastAudio = null; lastProgress = 0;
   if (!voiceOff && voicePref === "man") {
     try {
@@ -684,11 +735,11 @@ async function speak(){
         const times = d.alignment && d.alignment.character_start_times_seconds;
         words.forEach(w => { w.t = times && times[w.start] != null ? times[w.start] : null; });
         lastAudio = { buf, timed: !!times };
-        return playBuffer(lastAudio);
+        return lastAudio;
       }
     } catch(e) {}
   }
-  browserVoice(speech);
+  return null;
 }
 function playBuffer(a){
   stopVoice();
@@ -761,7 +812,7 @@ function welcome(){
     "<ellipse cx='400' cy='300' rx='90' ry='32' fill='none' stroke='#ffa3b1' stroke-width='3' transform='rotate(60 400 300)'/>" +
     "<ellipse cx='400' cy='300' rx='90' ry='32' fill='none' stroke='#a8e6a3' stroke-width='3' transform='rotate(-60 400 300)'/>" +
     "<text x='400' y='445' text-anchor='middle' font-family='Kalam' font-size='40' fill='#f5f3ea'>Ask anything.</text>" }]);
-  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { manual = true; showFigure(0); });
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { if (liveBoard || lesson || busy) return; manual = true; showFigure(0); });
 }
 
 /* ---------- start ---------- */
