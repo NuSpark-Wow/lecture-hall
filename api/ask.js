@@ -5,6 +5,8 @@
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
 const CHECK_MODEL = process.env.CLAUDE_CHECK_MODEL || "claude-haiku-5-5";
+// The drawing step uses the faster model. To switch back, add BOARD_MODEL = claude-sonnet-5-5 in Vercel settings.
+const BOARD_MODEL = process.env.BOARD_MODEL || "claude-haiku-5-5";
 const HOURLY_LIMIT = 30;
 const hits = new Map();
 
@@ -111,9 +113,9 @@ async function anthropic(body) {
   return r.json();
 }
 
-async function callTool(system, tool, user, maxTokens, check) {
+async function callTool(system, tool, user, maxTokens, check, model) {
   const data = await anthropic({
-    model: MODEL, max_tokens: maxTokens, system,
+    model: model || MODEL, max_tokens: maxTokens, system,
     tools: [tool], tool_choice: { type: "auto" },
     messages: [{ role: "user", content: user }]
   });
@@ -217,7 +219,7 @@ module.exports = async (req, res) => {
 
   if (part === "board") {
     try {
-      const b = await withRetry(() => callTool(SYSTEM_BOARD, BOARD_TOOL, user, 10000, j => Array.isArray(j.figures)), 40000);
+      const b = await withRetry(() => callTool(SYSTEM_BOARD, BOARD_TOOL, user, 10000, j => Array.isArray(j.figures), BOARD_MODEL), 40000);
       const figures = b.figures.slice(0, 4).map(f => ({ title: String(f.title || ""), caption: String(f.caption || ""), svg: cleanSvg(f.svg),
         legend: (Array.isArray(f.legend) ? f.legend : []).slice(0, 10).map(l => ({ symbol: String(l && l.symbol || "").slice(0, 20), meaning: String(l && l.meaning || "").slice(0, 160) })).filter(l => l.symbol && l.meaning),
         formulas: (Array.isArray(f.formulas) ? f.formulas : []).slice(0, 4).map(x => ({ formula: String(x && x.formula || "").slice(0, 80), explanation: String(x && x.explanation || "").slice(0, 400) })).filter(x => x.formula && x.explanation) }));
