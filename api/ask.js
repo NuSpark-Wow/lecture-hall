@@ -278,6 +278,8 @@ module.exports = async (req, res) => {
   const context = isGet ? "" : String(src.context || "").slice(0, 200);
   const more = !isGet && src.more === true;
   const prev = isGet ? "" : String(src.prev || "").slice(0, 3000);
+  // the figures request carries the lecture, one section per line, so each figure matches a section
+  const paras = String(src.a || "").split("\n").map(x => x.trim()).filter(Boolean).slice(0, 5).map(x => x.slice(0, 900));
   if (!question) return send(400, { error: "empty" });
 
   if (HELP_WORDS.test(question)) {
@@ -307,10 +309,15 @@ module.exports = async (req, res) => {
 
   let user = `${DEPTH[depth]}\n\n${context ? `We were just discussing: ${context}\n` : ""}Question: ${question}`;
   if (more) {
-    user = `${DEPTH[depth]}\n\nThe learner tapped "Go deeper" on: ${context}\nHere is what was ALREADY covered:\n${prev}\n\nGo one level deeper on this same topic: new mechanisms, history, numbers, or implications. Do not repeat what was already said. Title it like "Deeper: ...".`;
+    user = `${DEPTH[depth]}\n\nThe learner tapped "Go deeper" on: ${context}\nHere is what was ALREADY covered:\n${prev}\n\nGo one level deeper on this same topic: new mechanisms, history, numbers, or implications. Do not repeat what was already said. Title it like "Deeper: ...".${/^go deeper on /i.test(question) ? "" : `\nThe learner specifically wants to dig into: ${question}`}`;
   }
 
-  if (part === "board") return streamBoard(res, isGet, user, 4, false);
+  if (part === "board") {
+    if (paras.length) {
+      user += `\n\nThe lecture, section by section:\n${paras.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\nDraw EXACTLY ${paras.length} figures, one per section, in the same order. Figure k must illustrate section k, so the chalkboard changes as the professor talks. Title them "Fig. 1: ...", "Fig. 2: ...", and so on.`;
+    }
+    return streamBoard(res, isGet, user, paras.length || 4, false);
+  }
 
   let lec;
   try {
