@@ -104,16 +104,55 @@ button{font-family:inherit;cursor:pointer}
   .mic{width:56px;height:56px;font-size:24px}
   .go{width:100%;height:52px}
 }
+.top-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.toggle small{display:block;font-size:11px;font-weight:600;opacity:.75}
+.thumbs{display:flex;align-items:center;gap:6px;margin-left:auto;font-weight:700;font-size:13.5px;color:var(--soft)}
+.thumbs button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:7px 10px;font-size:17px}
+.course{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-left:5px solid var(--gold);border-radius:12px;padding:10px 14px;margin-bottom:12px}
+.course .ct{font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:17px;margin-right:6px}
+.course .part{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 12px;font-weight:600;font-size:13.5px;color:var(--ink)}
+.course .part.done{background:#eef6ef;border-color:#bcd9c2;color:#2c5a38}
+.course .part.now{background:var(--ink);color:#fff;border-color:var(--ink)}
+.course .x{margin-left:auto;border:0;background:none;color:var(--soft);font-weight:700;font-size:13px}
+.bigbtn.course-btn{background:var(--accent);box-shadow:0 3px 0 var(--accent-d)}
+.bigbtn.next-btn{background:var(--gold);box-shadow:0 3px 0 #9a7220}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:10px;font-weight:600;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
+.toast.on{opacity:1}
+.print-figs{display:none}
+
+/* Save as PDF / print */
+@media print{
+  @page{margin:14mm}
+  body{background:#fff}
+  .ask,.starters,.top-right,.playrow,.deeper,.notice,.thinking,.ctrls,.course .x,.toast{display:none !important}
+  .wrap{max-width:none;padding:0}
+  .board-wrap{display:none}
+  .print-figs{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .print-figs figure{margin:0 0 14px;break-inside:avoid;border:2px solid #6b4a2e;border-radius:8px;overflow:hidden}
+  .print-figs svg{display:block;width:100%;height:auto;background:#1f3a2e;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .print-figs figcaption{font-size:13px;padding:6px 10px;color:#1d2329}
+  .study{grid-template-columns:1fr}
+  .notes,.card{border:1px solid #ddd;break-inside:avoid}
+  .read .w{color:#1d2329 !important;background:none !important}
+}
 </style>
+<script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
+<script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
 <div class="wrap">
 
   <div class="top">
     <div class="brand">The <span>Lecture Hall</span><small>Ask anything. Learn it like a class.</small></div>
-    <div class="toggle" role="group" aria-label="Choose a voice">
-      <button id="vMan" class="on">🔊 Man</button>
-      <button id="vWoman">🔊 Woman</button>
+    <div class="top-right">
+      <div class="toggle" role="group" aria-label="Lecture length">
+        <button id="dQuick">⚡ Quick<small>2-min overview</small></button>
+        <button id="dFull" class="on">🎓 Full<small>full lecture</small></button>
+      </div>
+      <div class="toggle" role="group" aria-label="Choose a voice">
+        <button id="vMan" class="on">🔊 Man</button>
+        <button id="vWoman">🔊 Woman</button>
+      </div>
     </div>
   </div>
 
@@ -127,10 +166,12 @@ button{font-family:inherit;cursor:pointer}
   </div>
   <div class="starters" id="starters"></div>
 
+  <div class="course hide" id="course"></div>
+
   <div class="board-wrap">
     <div class="board">
       <svg id="svg" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" aria-label="Chalkboard"></svg>
-      <div class="thinking" id="thinking"><div>Thinking...</div><div class="dots"><span></span><span></span><span></span></div></div>
+      <div class="thinking" id="thinking"><div id="thinkText">Thinking...</div><div class="dots"><span></span><span></span><span></span></div></div>
     </div>
     <div class="tray">
       <div class="caption" id="caption">Ask a question to begin the lecture.</div>
@@ -141,14 +182,18 @@ button{font-family:inherit;cursor:pointer}
       </div>
     </div>
   </div>
+  <div class="print-figs" id="printFigs"></div>
 
   <div class="study">
     <div class="notes">
       <h2 id="title">Welcome to class</h2>
       <div class="read" id="read"><p>Ask a question by voice or by typing. You'll get a short lecture, read aloud, with figures drawn on the chalkboard as we go.</p></div>
       <div class="playrow hide" id="playrow">
-        <button class="btn" id="again">🔊 Hear it again</button>
+        <button class="btn" id="again">🔊 Hear it</button>
         <button class="btn hide" id="stop">⏹ Stop</button>
+        <button class="btn" id="share">🔗 Share</button>
+        <button class="btn" id="pdf">📄 Save as PDF</button>
+        <div class="thumbs" id="thumbs"><span id="helpful">Helpful?</span><button id="up" aria-label="Yes">👍</button><button id="down" aria-label="No">👎</button></div>
       </div>
     </div>
     <div class="side hide" id="side">
@@ -162,8 +207,10 @@ button{font-family:inherit;cursor:pointer}
   <div class="card deeper hide" id="deepCard">
     <h3>Keep learning</h3>
     <div class="big-btns">
+      <button class="bigbtn next-btn hide" id="nextPart">▶ Next part</button>
       <button class="bigbtn ask-about" id="askAbout">🎤 Ask about this</button>
       <button class="bigbtn more" id="goDeeper">➕ Go deeper</button>
+      <button class="bigbtn course-btn" id="makeCourse">📚 Make it a course</button>
     </div>
     <div class="sub">Or explore:</div>
     <div class="row" id="deeper"></div>
@@ -171,6 +218,7 @@ button{font-family:inherit;cursor:pointer}
 
   <p class="notice">🖼️ Photos are public domain or free to share, from sources like Wikimedia Commons, NASA, and the Smithsonian. Your voice is never recorded; your words are turned into text right away. AI can make mistakes, so double-check anything important.</p>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
 (() => {
@@ -178,17 +226,28 @@ const $ = id => document.getElementById(id);
 const NS = "http://www.w3.org/2000/svg";
 const STARTERS = ["How does inflation work?","Why did the Roman Empire fall?","How do vaccines train the immune system?","What causes the northern lights?","How does a jet engine work?","How do interest rates affect mortgages?","How does GPS know where you are?","What is quantum entanglement?","Why do we dream?","How did the printing press change the world?"];
 
-let lesson = null, busy = false, followUp = "";
-let groups = [], shown = 0, manual = false;
+let lesson = null, busy = false, followUp = "", reqId = 0, lastQuestion = "", figs = [];
+let groups = [], shown = 0, manual = false, lastProgress = 0;
 let words = [], speech = "";
 let ctx = null, srcNode = null, lastAudio = null, raf = 0, voiceOff = false, speaking = false;
+let depth = "full", course = null;
+function track(name, data){ try { window.va("event", { name, data }); } catch(e) {} }
+function toast(msg){ const el = $("toast"); el.textContent = msg; el.classList.add("on"); setTimeout(() => el.classList.remove("on"), 2200); }
 
 function renderStarters(){
   const pool = [...STARTERS].sort(() => Math.random() - .5).slice(0, 3);
   const box = $("starters"); box.innerHTML = "";
   const lab = document.createElement("span"); lab.className = "lab"; lab.textContent = "Try:"; box.appendChild(lab);
-  pool.forEach(t => { const b = document.createElement("button"); b.className = "chip"; b.textContent = t; b.onclick = () => { unlock(); $("q").value = t; ask(); }; box.appendChild(b); });
+  pool.forEach(q => { const b = document.createElement("button"); b.className = "chip"; b.textContent = q; b.onclick = () => { unlock(); $("q").value = q; ask(); }; box.appendChild(b); });
 }
+
+/* ---------- Quick vs Full ---------- */
+function setDepth(d){
+  depth = d; $("dQuick").classList.toggle("on", d === "quick"); $("dFull").classList.toggle("on", d === "full");
+  try { localStorage.setItem("lh_depth", d); } catch(e) {}
+}
+$("dQuick").onclick = () => setDepth("quick");
+$("dFull").onclick = () => setDepth("full");
 
 /* ---------- audio unlock ---------- */
 function unlock(){
@@ -206,19 +265,15 @@ function setVoicePref(p){
 }
 $("vMan").onclick = () => { setVoicePref("man"); unlock(); sayShort("Welcome to the Lecture Hall."); };
 $("vWoman").onclick = () => { setVoicePref("woman"); unlock(); sayShort("Welcome to the Lecture Hall."); };
-setVoicePref(voicePref);
 
 // Picks a different voice than the kids' site: the second-best match when the device has more than one.
 function pickVoice(){
   const vs = speechSynthesis.getVoices().filter(v => /^en(-|_)(US|GB)/i.test(v.lang));
   const male = /\bmale\b|christopher|roger|eric|guy|davis|tom|daniel|ryan|thomas|brian|andrew|aaron|alex|david|mark|fred|arthur|oliver/i;
   const female = /female|michelle|jenny|samantha|allison|ava|aria|emma|sonia|libby|susan|serena|kate|zira|joanna|google us english|google uk english female/i;
-  const want = voicePref === "woman"
-    ? (v => female.test(v.name))
-    : (v => male.test(v.name) && !female.test(v.name));
+  const want = voicePref === "woman" ? (v => female.test(v.name)) : (v => male.test(v.name) && !female.test(v.name));
   const natural = vs.filter(v => /natural|online|enhanced|premium/i.test(v.name) && want(v));
-  const any = vs.filter(want);
-  const pool = natural.length ? natural : any;
+  const pool = natural.length ? natural : vs.filter(want);
   return pool[1] || pool[0] || vs[0] || null;
 }
 
@@ -234,7 +289,7 @@ if (!SR) {
   $("hint").textContent = "Type your question. (Speaking works in Chrome, Edge, and Safari.)";
 } else {
   rec = new SR(); rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false;
-  rec.onresult = e => { let t = ""; for (const r of e.results) t += r[0].transcript; $("q").value = t; };
+  rec.onresult = e => { let s = ""; for (const r of e.results) s += r[0].transcript; $("q").value = s; };
   rec.onend = () => {
     listening = false; $("mic").classList.remove("listening"); $("mic").textContent = "🎤";
     if ($("q").value.trim()) { $("hint").textContent = "Look right? Tap Ask. (Or tap the mic to try again.)"; $("go").classList.add("ready"); }
@@ -243,10 +298,19 @@ if (!SR) {
   rec.onerror = e => { if (e.error === "not-allowed" || e.error === "service-not-allowed") $("hint").textContent = "Microphone is blocked. Allow it in your browser, or type instead."; };
   $("mic").onclick = () => { unlock(); if (listening) { rec.stop(); return; } $("q").value = ""; $("go").classList.remove("ready"); startListening(); };
 }
-$("go").onclick = () => { unlock(); ask(); };
-$("q").addEventListener("keydown", e => { if (e.key === "Enter") { unlock(); ask(); } });
+$("go").onclick = () => { unlock(); if (course && !course.locked) endCourse(); ask(); };
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") { unlock(); if (course && !course.locked) endCourse(); ask(); } });
 
-/* ---------- ask ---------- */
+/* ---------- asking: words and figures are fetched at the same time ---------- */
+const norm = s => s.toLowerCase().replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
+async function fetchPart(part, question, context, opts){
+  let r;
+  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&q=${encodeURIComponent(norm(question))}`);
+  else r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" },
+    body: JSON.stringify({ part, question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
+  const d = await r.json().catch(() => null);
+  return { ok: r.ok, status: r.status, d };
+}
 async function ask(text, context, opts){
   opts = opts || {};
   if (!context && followUp) context = followUp;
@@ -254,42 +318,60 @@ async function ask(text, context, opts){
   const question = (text || $("q").value).trim();
   if (!question || busy) return;
   if (text) $("q").value = text;
+  const my = ++reqId;
   busy = true; $("go").disabled = true; $("go").classList.remove("ready");
-  stopVoice(); $("thinking").classList.add("on");
+  stopVoice(); $("thinkText").textContent = "Thinking..."; $("thinking").classList.add("on");
   $("hint").textContent = "Preparing your lecture…";
+
+  const boardP = (async () => {
+    for (let a = 0; a < 2; a++) {
+      try { const x = await fetchPart("board", question, context, opts); if (x.d && Array.isArray(x.d.figures)) return x.d.figures; } catch(e) {}
+    }
+    return null;
+  })();
+
   let data = null, reason = "N0";
   for (let attempt = 0; attempt < 2 && !data; attempt++) {
     if (attempt === 1) $("hint").textContent = "One more moment…";
     try {
-      const r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ question, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
-      const d = await r.json().catch(() => null);
-      if (d && Array.isArray(d.answer) && d.answer.length) data = d;
-      else reason = (d && d.reason) || ("H" + r.status);
+      const x = await fetchPart("lecture", question, context, opts);
+      if (x.d && Array.isArray(x.d.answer) && x.d.answer.length) data = x.d;
+      else reason = (x.d && x.d.reason) || ("H" + x.status);
     } catch(e) { reason = "N0"; }
   }
-  try {
-    if (!data) throw new Error(reason);
-    lesson = data; render();
-    $("hint").textContent = "Ask another question anytime.";
-  } catch(e) {
-    lesson = null; stopVoice();
+  if (my !== reqId) return;
+  busy = false; $("go").disabled = false;
+  if (!data) {
+    lesson = null; stopVoice(); $("thinking").classList.remove("on");
     $("title").textContent = "The chalk broke.";
     $("read").innerHTML = "<p>Something went wrong. Please ask your question again.</p>";
     const code = document.createElement("p"); code.style.cssText = "font-size:12px;color:#98a1a9;font-family:Inter,sans-serif";
-    code.textContent = "Code: " + (data ? "P8" : e.message); $("read").appendChild(code);
+    code.textContent = "Code: " + reason; $("read").appendChild(code);
     ["playrow","side","deepCard"].forEach(id => $(id).classList.add("hide"));
-    buildBoard([{ title: "", caption: "Try again", svg: blankCard() }]); revealNext();
+    buildBoard([{ title: "", caption: "Try again", svg: blankCard() }]); showFigure(0);
     $("hint").textContent = "Tap Ask to try again.";
-  } finally {
-    $("thinking").classList.remove("on"); busy = false; $("go").disabled = false;
+    return;
   }
+  lastQuestion = (!context && !opts.more) ? question : "";
+  lesson = data; render(opts);
+  $("hint").textContent = "Ask another question anytime.";
+  track("lecture", { topic: String(data.title || "").slice(0, 80), depth, type: data.type, course: course ? "yes" : "no" });
+
+  if (data.type !== "lecture") { $("thinking").classList.remove("on"); return; }
+  $("thinkText").textContent = "Drawing the figures...";
+  const f = await boardP;
+  if (my !== reqId) return;
+  $("thinking").classList.remove("on");
+  figs = f && f.length ? f : [{ title: "", caption: "", svg: blankCard() }];
+  buildBoard(figs);
+  if (lastProgress >= 1 || !speaking) { manual = true; showFigure(0); }
+  else onProgress(lastProgress);
 }
 
 /* ---------- render ---------- */
-function render(){
+function render(opts){
   const L = lesson, isLec = L.type === "lecture";
   $("title").textContent = L.title || "Today's lecture";
-  // lecture notes with read-along
   const parts = (L.answer || []).map(a => typeof a === "string" ? { heading: "", text: a } : a);
   speech = parts.map(a => a.text).join(" ");
   words = []; let offset = 0; const read = $("read"); read.innerHTML = "";
@@ -304,35 +386,107 @@ function render(){
     read.appendChild(el); offset += a.text.length + 1;
   });
   $("playrow").classList.remove("hide");
+  $("thumbs").classList.toggle("hide", !isLec); $("share").classList.toggle("hide", !isLec); $("pdf").classList.toggle("hide", !isLec);
+  $("helpful").textContent = "Helpful?"; $("up").disabled = false; $("down").disabled = false;
 
-  // chalkboard figures
-  const figs = isLec && L.board && Array.isArray(L.board.figures) && L.board.figures.length ? L.board.figures : [{ title: "", caption: L.type === "help" ? "You matter." : "Ask another question.", svg: blankCard() }];
-  buildBoard(figs);
+  figs = [];
+  if (isLec) buildBoard([]);
+  else { buildBoard([{ title: "", caption: L.type === "help" ? "You matter." : "Ask another question.", svg: blankCard() }]); showFigure(0); }
 
-  // sidebar
   ["side","termsCard","imgCard","factCard","mythCard","deepCard"].forEach(id => $(id).classList.add("hide"));
   if (isLec) {
     const tb = $("terms"); tb.innerHTML = "";
-    (L.terms || []).forEach(t => { if (!t || !t.word) return; const d = document.createElement("div"); d.innerHTML = "<b></b>: <span></span>"; d.querySelector("b").textContent = t.word; d.querySelector("span").textContent = t.meaning || ""; tb.appendChild(d); });
+    (L.terms || []).forEach(x => { if (!x || !x.word) return; const d = document.createElement("div"); d.innerHTML = "<b></b>: <span></span>"; d.querySelector("b").textContent = x.word; d.querySelector("span").textContent = x.meaning || ""; tb.appendChild(d); });
     if (tb.children.length) { $("termsCard").classList.remove("hide"); $("side").classList.remove("hide"); }
     if (L.surprising) { $("fact").textContent = L.surprising; $("factCard").classList.remove("hide"); $("side").classList.remove("hide"); }
     if (L.misconception) { $("myth").textContent = L.misconception; $("mythCard").classList.remove("hide"); $("side").classList.remove("hide"); }
     if (L.image_query) loadImage(L.image_query);
 
-    // keep learning
     const row = $("deeper"); row.innerHTML = "";
-    (L.deeper || []).slice(0, 3).forEach(t => { const b = document.createElement("button"); b.className = "chip"; b.textContent = t; b.onclick = () => { unlock(); ask(t, L.title); window.scrollTo({ top: 0, behavior: "smooth" }); }; row.appendChild(b); });
+    (L.deeper || []).slice(0, 3).forEach(q => { const b = document.createElement("button"); b.className = "chip"; b.textContent = q; b.onclick = () => { unlock(); ask(q, L.title); window.scrollTo({ top: 0, behavior: "smooth" }); }; row.appendChild(b); });
     document.querySelector(".deeper .sub").classList.toggle("hide", !row.children.length);
     $("goDeeper").onclick = () => { unlock(); ask("Go deeper on " + L.title, L.title, { more: true, prev: speech }); window.scrollTo({ top: 0, behavior: "smooth" }); };
     $("askAbout").onclick = () => { unlock(); followUp = L.title; $("q").value = ""; window.scrollTo({ top: 0, behavior: "smooth" }); $("hint").textContent = "What would you like to know about " + L.title + "?"; startListening(); };
+    $("makeCourse").onclick = () => { unlock(); startCourse(L.title); };
+    $("makeCourse").classList.toggle("hide", !!course);
+    $("nextPart").classList.toggle("hide", !(course && course.idx < course.parts.length - 1));
     $("deepCard").classList.remove("hide");
   }
-  speak();
+  renderCourse();
+  if (!(opts && opts.silent)) speak(); else { $("again").textContent = "🔊 Hear it"; }
 }
 
 function blankCard(){
   return "<circle cx='400' cy='220' r='90' fill='none' stroke='#ffe08a' stroke-width='4'/><text x='400' y='255' text-anchor='middle' font-family='Kalam' font-size='100' fill='#ffe08a'>?</text><text x='400' y='400' text-anchor='middle' font-family='Kalam' font-size='34' fill='#f5f3ea'>What are you curious about?</text>";
 }
+
+/* ---------- mini-course ---------- */
+async function startCourse(topic){
+  if (busy) return;
+  busy = true; $("makeCourse").disabled = true; $("hint").textContent = "Planning your mini-course…";
+  let o = null;
+  try {
+    const r = await fetch(`/api/ask?part=outline&q=${encodeURIComponent(norm(topic))}`);
+    o = await r.json();
+  } catch(e) {}
+  busy = false; $("makeCourse").disabled = false;
+  if (!o || !Array.isArray(o.parts) || !o.parts.length) { toast("Couldn't plan a course on that one. Try another topic."); $("hint").textContent = "Ask another question anytime."; return; }
+  course = { title: o.title || topic, parts: o.parts, idx: 0, locked: true };
+  saveCourse(); track("course_start", { topic: course.title.slice(0, 80) });
+  playPart(0);
+}
+function playPart(i){
+  if (!course) return;
+  course.idx = i; course.locked = true; saveCourse(); renderCourse();
+  const p = course.parts[i];
+  ask(p.question).then(() => { if (course) course.locked = false; });
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+function endCourse(){ course = null; saveCourse(); renderCourse(); $("makeCourse").classList.remove("hide"); $("nextPart").classList.add("hide"); }
+function saveCourse(){ try { if (course) localStorage.setItem("lh_course", JSON.stringify({ title: course.title, parts: course.parts, idx: course.idx })); else localStorage.removeItem("lh_course"); } catch(e) {} }
+function renderCourse(){
+  const box = $("course");
+  if (!course) { box.classList.add("hide"); box.innerHTML = ""; return; }
+  box.classList.remove("hide"); box.innerHTML = "";
+  const tt = document.createElement("span"); tt.className = "ct"; tt.textContent = "📚 " + course.title; box.appendChild(tt);
+  course.parts.forEach((p, i) => {
+    const b = document.createElement("button");
+    b.className = "part" + (i < course.idx ? " done" : i === course.idx ? " now" : "");
+    b.textContent = (i < course.idx ? "✓ " : "") + "Part " + (i + 1) + ": " + p.title;
+    b.onclick = () => { unlock(); playPart(i); };
+    box.appendChild(b);
+  });
+  const x = document.createElement("button"); x.className = "x"; x.textContent = "✖ Leave course"; x.onclick = endCourse; box.appendChild(x);
+}
+$("nextPart").onclick = () => { unlock(); if (course && course.idx < course.parts.length - 1) playPart(course.idx + 1); };
+
+/* ---------- share + PDF + feedback ---------- */
+$("share").onclick = async () => {
+  const q = lastQuestion || (lesson && lesson.title) || "";
+  const url = location.origin + "/?q=" + encodeURIComponent(q) + (depth === "quick" ? "&d=quick" : "");
+  track("share", { topic: String(lesson && lesson.title || "").slice(0, 80) });
+  try { if (navigator.share) { await navigator.share({ title: (lesson && lesson.title) || "The Lecture Hall", url }); return; } } catch(e) { return; }
+  try { await navigator.clipboard.writeText(url); toast("Link copied. Paste it anywhere to share."); }
+  catch(e) { window.prompt("Copy this link to share:", url); }
+};
+$("pdf").onclick = () => { track("pdf", { topic: String(lesson && lesson.title || "").slice(0, 80) }); window.print(); };
+window.addEventListener("beforeprint", () => {
+  const box = $("printFigs"); box.innerHTML = "";
+  figs.forEach(f => {
+    const fig = document.createElement("figure");
+    const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 500");
+    const g = sanitize(f.svg || ""); if (g) svg.appendChild(g);
+    const cap = document.createElement("figcaption"); cap.textContent = [f.title, f.caption].filter(Boolean).join(": ");
+    fig.appendChild(svg); fig.appendChild(cap); box.appendChild(fig);
+  });
+});
+function vote(v){
+  if (!lesson) return;
+  track("feedback", { vote: v, topic: String(lesson.title || "").slice(0, 80), depth });
+  $("helpful").textContent = "Thanks!"; $("up").disabled = true; $("down").disabled = true;
+}
+$("up").onclick = () => vote("up");
+$("down").onclick = () => vote("down");
 
 /* ---------- chalkboard: safe SVG, one figure at a time ---------- */
 const OK_TAGS = new Set(["g","path","line","circle","ellipse","rect","polyline","polygon","text","tspan"]);
@@ -356,15 +510,15 @@ function sanitize(markup){
   copy(doc.documentElement, out);
   return out;
 }
-function buildBoard(figs){
+function buildBoard(list){
   const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false;
-  figs.forEach(f => {
+  list.forEach(f => {
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
     svg.appendChild(g); groups.push(g);
   });
-  svg.querySelectorAll("text").forEach(t => t.addEventListener("click", () => { if (!speaking) sayShort(t.textContent); }));
-  $("caption").textContent = groups.length > 1 ? "Watch the board." : (figs[0].caption || "");
+  svg.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
+  $("caption").textContent = list.length > 1 ? "Watch the board." : (list[0] ? list[0].caption || "" : "");
   updateCtrls();
 }
 function drawGroup(g){
@@ -379,9 +533,9 @@ function drawGroup(g){
     }
     let len = 0; try { len = el.getTotalLength(); } catch(e) {}
     const fill = el.getAttribute("fill"); const hasFill = fill && fill !== "none" && fill !== "transparent";
+    const fo = el.getAttribute("fill-opacity") || "1";
     el.style.transition = "none";
     if (len > 0 && el.getAttribute("stroke")) { el.style.strokeDasharray = len; el.style.strokeDashoffset = len; }
-    const fo = el.getAttribute("fill-opacity") || "1";
     if (hasFill) el.style.fillOpacity = 0;
     el.getBoundingClientRect();
     requestAnimationFrame(() => {
@@ -393,20 +547,21 @@ function drawGroup(g){
 function showFigure(i){
   if (i < 0 || i >= groups.length) return;
   drawGroup(groups[i]); shown = i + 1;
-  const g = groups[i], label = g.dataset.title ? `<b></b> ` : "";
-  const cap = $("caption"); cap.innerHTML = label;
-  if (g.dataset.title) cap.querySelector("b").textContent = g.dataset.title + (groups.length > 1 ? ` (${i + 1} of ${groups.length})` : "");
+  const g = groups[i], cap = $("caption"); cap.innerHTML = "";
+  if (g.dataset.title) { const b = document.createElement("b"); b.textContent = g.dataset.title + (groups.length > 1 ? ` (${i + 1} of ${groups.length}) ` : " "); cap.appendChild(b); }
   cap.appendChild(document.createTextNode(g.dataset.caption || ""));
   updateCtrls();
 }
 function revealNext(){ if (shown < groups.length) showFigure(shown); }
-function updateCtrls(){
-  $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0;
-}
+function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0; }
 $("next").onclick = () => { manual = true; revealNext(); };
 $("prev").onclick = () => { manual = true; if (shown > 1) showFigure(shown - 2); };
 $("replay").onclick = () => { manual = true; if (shown > 0) showFigure(shown - 1); };
-function onProgress(f){ if (manual) return; while (shown < groups.length && f >= shown / groups.length) revealNext(); }
+function onProgress(f){
+  lastProgress = Math.max(lastProgress, f);
+  if (manual) return;
+  while (shown < groups.length && f >= shown / groups.length) revealNext();
+}
 
 /* ---------- voice + read-along ---------- */
 function highlight(ci){
@@ -415,7 +570,7 @@ function highlight(ci){
   words.forEach((w, i) => { w.el.classList.toggle("on", i === k); w.el.classList.toggle("done", i < k); });
 }
 function clearHighlight(){ words.forEach(w => w.el.classList.remove("on","done")); $("read").classList.remove("speaking"); }
-function setSpeaking(on){ speaking = on; $("read").classList.toggle("speaking", on); $("stop").classList.toggle("hide", !on); $("again").classList.toggle("hide", on); }
+function setSpeaking(on){ speaking = on; $("read").classList.toggle("speaking", on); $("stop").classList.toggle("hide", !on); $("again").classList.toggle("hide", on); if (!on) $("again").textContent = "🔊 Hear it again"; }
 function finish(){ setSpeaking(false); words.forEach(w => { w.el.classList.remove("on"); w.el.classList.add("done"); }); onProgress(1); }
 function stopVoice(){
   cancelAnimationFrame(raf);
@@ -429,7 +584,7 @@ $("again").onclick = () => { unlock(); if (lastAudio) playBuffer(lastAudio); els
 
 async function speak(){
   if (!speech) return;
-  lastAudio = null;
+  lastAudio = null; lastProgress = 0;
   if (!voiceOff && voicePref === "man") {
     try {
       const r = await fetch("/api/speak", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ text: speech }) });
@@ -456,10 +611,10 @@ function playBuffer(a){
   srcNode.onended = () => { cancelAnimationFrame(raf); finish(); };
   srcNode.start();
   const tick = () => {
-    const t = ctx.currentTime - t0;
-    if (a.timed) { let k = -1; for (let i = 0; i < words.length; i++) { if (words[i].t != null && words[i].t <= t) k = i; } if (k >= 0) highlight(words[k].start); }
-    else highlight(Math.floor(speech.length * t / dur));
-    onProgress(t / dur);
+    const tm = ctx.currentTime - t0;
+    if (a.timed) { let k = -1; for (let i = 0; i < words.length; i++) { if (words[i].t != null && words[i].t <= tm) k = i; } if (k >= 0) highlight(words[k].start); }
+    else highlight(Math.floor(speech.length * tm / dur));
+    onProgress(tm / dur);
     raf = requestAnimationFrame(tick);
   };
   tick();
@@ -518,11 +673,17 @@ function welcome(){
     "<ellipse cx='400' cy='300' rx='90' ry='32' fill='none' stroke='#ffa3b1' stroke-width='3' transform='rotate(60 400 300)'/>" +
     "<ellipse cx='400' cy='300' rx='90' ry='32' fill='none' stroke='#a8e6a3' stroke-width='3' transform='rotate(-60 400 300)'/>" +
     "<text x='400' y='445' text-anchor='middle' font-family='Kalam' font-size='40' fill='#f5f3ea'>Ask anything.</text>" }]);
-  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => showFigure(0));
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { manual = true; showFigure(0); });
 }
 
-renderStarters();
-welcome();
+/* ---------- start ---------- */
+try { if (localStorage.getItem("lh_depth") === "quick") depth = "quick"; } catch(e) {}
+setDepth(depth); setVoicePref(voicePref); renderStarters(); welcome();
+try { const c = JSON.parse(localStorage.getItem("lh_course") || "null"); if (c && Array.isArray(c.parts) && c.parts.length) { course = { ...c, locked: false }; renderCourse(); $("hint").textContent = "Welcome back. Tap a part above to continue your course."; } } catch(e) {}
+// A shared link (?q=...) opens that lecture right away; tap 🔊 Hear it to listen.
+const params = new URLSearchParams(location.search);
+const sq = params.get("q");
+if (sq) { if (params.get("d") === "quick") setDepth("quick"); $("q").value = sq; ask(sq, "", { silent: true }); }
 })();
 </script>
 </body>
