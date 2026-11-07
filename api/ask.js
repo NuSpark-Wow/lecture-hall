@@ -145,7 +145,7 @@ async function streamClaude(system, user, maxTokens, model, onText) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, stream: true, messages: [{ role: "user", content: user }] })
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, stream: true, thinking: { type: "disabled" }, messages: [{ role: "user", content: user }] })
   });
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error("api_" + r.status + " " + t.slice(0, 200)); }
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
@@ -250,12 +250,16 @@ function cleanSvg(svg) {
 async function safetyCheck(question, lec) {
   const text = [lec.title, ...lec.answer.map(a => a.text), lec.surprising, lec.misconception, lec.image_query].join("\n");
   const data = await anthropic({
-    model: CHECK_MODEL, max_tokens: 5,
+    model: CHECK_MODEL, max_tokens: 20, thinking: { type: "disabled" },
     system: "You review content for a general-audience educational website for adults. Reply with exactly one word: SAFE or UNSAFE. UNSAFE only for sexual content, step-by-step instructions that could cause serious harm (weapons, drugs, hacking, dangerous chemistry), hate or harassment, or encouragement of self-harm. Normal education about history, war, medicine, the body, science, money, politics or religion explained neutrally is SAFE.",
     messages: [{ role: "user", content: `Question: ${question}\n\nContent:\n${text}` }]
   });
-  const verdict = (data.content || []).map(b => b.text || "").join("");
-  return /^\s*SAFE/i.test(verdict);
+  const verdict = (data.content || []).filter(b => b.type === "text").map(b => b.text || "").join("");
+  if (!verdict.trim()) { console.error("safety check gave no answer"); throw new Error("blank_verdict"); }
+  // Only an explicit UNSAFE blocks; formatting like "**SAFE**" or "Safe." passes.
+  const unsafe = /UNSAFE|NOT\s+SAFE/i.test(verdict);
+  if (unsafe) console.error("safety check said UNSAFE for topic:", String(lec && lec.title || "").slice(0, 80));
+  return !unsafe;
 }
 
 module.exports = async (req, res) => {
