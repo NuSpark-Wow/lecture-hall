@@ -119,6 +119,10 @@ button{font-family:inherit;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:10px;font-weight:600;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
 .toast.on{opacity:1}
 .print-figs{display:none}
+.legend{margin:8px 4px 2px;padding:10px 12px;border-top:1px dashed rgba(255,255,255,.3);display:flex;flex-wrap:wrap;gap:6px 18px;color:#f5f3ea;font-size:14.5px;line-height:1.4}
+.legend .lt{width:100%;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#d9c9a8;font-weight:700}
+.legend b{font-family:Kalam,cursive;font-size:19px;color:#ffe08a;font-weight:700;margin-right:4px}
+.print-figs .plegend{font-size:12px;padding:0 10px 8px;color:#1d2329}
 
 /* Save as PDF / print */
 @media print{
@@ -146,8 +150,8 @@ button{font-family:inherit;cursor:pointer}
     <div class="brand">The <span>Lecture Hall</span><small>Ask anything. Learn it like a class.</small></div>
     <div class="top-right">
       <div class="toggle" role="group" aria-label="Lecture length">
-        <button id="dQuick">⚡ Quick<small>2-min overview</small></button>
-        <button id="dFull" class="on">🎓 Full<small>full lecture</small></button>
+        <button id="dQuick">⚡ Quick<small>1-min overview</small></button>
+        <button id="dFull" class="on">🎓 Full<small>3-min lecture</small></button>
       </div>
       <div class="toggle" role="group" aria-label="Choose a voice">
         <button id="vMan" class="on">🔊 Man</button>
@@ -181,6 +185,7 @@ button{font-family:inherit;cursor:pointer}
         <button id="replay" aria-label="Redraw figure" disabled>⟲</button>
       </div>
     </div>
+    <div class="legend hide" id="legend"></div>
   </div>
   <div class="print-figs" id="printFigs"></div>
 
@@ -305,7 +310,7 @@ $("q").addEventListener("keydown", e => { if (e.key === "Enter") { unlock(); if 
 const norm = s => s.toLowerCase().replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
 async function fetchPart(part, question, context, opts){
   let r;
-  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&q=${encodeURIComponent(norm(question))}`);
+  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&v=2&q=${encodeURIComponent(norm(question))}`);
   else r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" },
     body: JSON.stringify({ part, question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
   const d = await r.json().catch(() => null);
@@ -477,7 +482,9 @@ window.addEventListener("beforeprint", () => {
     const svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 800 500");
     const g = sanitize(f.svg || ""); if (g) svg.appendChild(g);
     const cap = document.createElement("figcaption"); cap.textContent = [f.title, f.caption].filter(Boolean).join(": ");
-    fig.appendChild(svg); fig.appendChild(cap); box.appendChild(fig);
+    fig.appendChild(svg); fig.appendChild(cap);
+    if (Array.isArray(f.legend) && f.legend.length) { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = f.legend.map(l => l.symbol + " = " + l.meaning).join("  ·  "); fig.appendChild(lg); }
+    box.appendChild(fig);
   });
 });
 function vote(v){
@@ -511,10 +518,11 @@ function sanitize(markup){
   return out;
 }
 function buildBoard(list){
-  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false;
+  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false; renderLegend([]);
   list.forEach(f => {
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
+    g._legend = Array.isArray(f.legend) ? f.legend : [];
     svg.appendChild(g); groups.push(g);
   });
   svg.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
@@ -550,9 +558,17 @@ function showFigure(i){
   const g = groups[i], cap = $("caption"); cap.innerHTML = "";
   if (g.dataset.title) { const b = document.createElement("b"); b.textContent = g.dataset.title + (groups.length > 1 ? ` (${i + 1} of ${groups.length}) ` : " "); cap.appendChild(b); }
   cap.appendChild(document.createTextNode(g.dataset.caption || ""));
+  renderLegend(g._legend);
   updateCtrls();
 }
 function revealNext(){ if (shown < groups.length) showFigure(shown); }
+function renderLegend(list){
+  const box = $("legend"); box.innerHTML = "";
+  if (!list || !list.length) { box.classList.add("hide"); return; }
+  const tt = document.createElement("div"); tt.className = "lt"; tt.textContent = "Symbols on this figure"; box.appendChild(tt);
+  list.forEach(l => { const d = document.createElement("span"); const b = document.createElement("b"); b.textContent = l.symbol; d.appendChild(b); d.appendChild(document.createTextNode("= " + l.meaning)); box.appendChild(d); });
+  box.classList.remove("hide");
+}
 function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0; }
 $("next").onclick = () => { manual = true; revealNext(); };
 $("prev").onclick = () => { manual = true; if (shown > 1) showFigure(shown - 2); };
