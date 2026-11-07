@@ -94,6 +94,19 @@ button{font-family:inherit;cursor:pointer}
 .bigbtn:active{transform:translateY(2px)}
 .deeper .sub{font-size:14px;font-weight:700;color:var(--soft);margin-bottom:8px}
 .deeper .row{display:flex;flex-wrap:wrap;gap:10px}
+.bigbtn.on{outline:3px solid var(--gold);outline-offset:2px}
+.follow{background:#f7f3ea;border:1px solid var(--line);border-radius:14px;padding:14px;margin:0 0 10px}
+.follow .fl{font-weight:700;font-size:16px;margin-bottom:10px;color:var(--ink)}
+.follow .frow{display:flex;gap:10px;align-items:center}
+.follow .fmic{flex:none;width:50px;height:50px;border-radius:50%;border:0;background:var(--red);color:#fff;font-size:22px;box-shadow:0 3px 0 #8a3328}
+.follow .fmic.listening{background:var(--green);box-shadow:0 3px 0 #2c5a38}
+.follow input{flex:1;min-width:0;height:50px;border:2px solid var(--line);border-radius:12px;padding:0 14px;font-size:16px;font-family:inherit;color:var(--ink);background:#fff}
+.follow input:focus{outline:none;border-color:var(--accent)}
+.follow .fgo{flex:none;border:0;background:var(--accent);color:#fff;font-weight:800;font-size:16px;padding:0 20px;height:50px;border-radius:12px;box-shadow:0 3px 0 var(--accent-d)}
+.follow .fgo:disabled{opacity:.75}
+.fstatus{font-weight:700;font-size:15px;color:var(--accent);min-height:22px;margin:0 0 10px}
+.fstatus:empty{display:none}
+@media (max-width:560px){.follow .frow{flex-wrap:wrap}.follow input{flex-basis:calc(100% - 60px)}.follow .fgo{flex:1 1 100%}}
 
 .notice{margin-top:18px;font-size:13px;color:var(--soft);line-height:1.5;text-align:center;font-weight:500}
 .hide{display:none !important}
@@ -220,6 +233,11 @@ button{font-family:inherit;cursor:pointer}
       <button class="bigbtn more" id="goDeeper">➕ Go deeper</button>
       <button class="bigbtn course-btn" id="makeCourse">📚 Make it a course</button>
     </div>
+    <div class="follow hide" id="followBox">
+      <div class="fl" id="fLabel"></div>
+      <div class="frow"><button class="fmic" id="fMic" aria-label="Speak">🎤</button><input id="fq" autocomplete="off"><button class="fgo" id="fGo"></button></div>
+    </div>
+    <div class="fstatus" id="fStatus" aria-live="polite"></div>
     <div class="sub">Or explore:</div>
     <div class="row" id="deeper"></div>
   </div>
@@ -288,9 +306,10 @@ function pickVoice(){
 
 /* ---------- microphone ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false;
+let rec = null, listening = false, micTarget = "q";
 function startListening(){
   if (!rec) { $("q").focus(); return; }
+  micTarget = "q";
   try { stopVoice(); rec.start(); listening = true; $("mic").classList.add("listening"); $("mic").textContent = "👂"; $("hint").textContent = "Listening… ask your question."; } catch(e) {}
 }
 if (!SR) {
@@ -300,13 +319,18 @@ if (!SR) {
   $("mic").onclick = () => { unlock(); $("q").focus(); $("hint").textContent = kb; };
 } else {
   rec = new SR(); rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false;
-  rec.onresult = e => { let s = ""; for (const r of e.results) s += r[0].transcript; $("q").value = s; };
+  rec.onresult = e => { let s = ""; for (const r of e.results) s += r[0].transcript; $(micTarget).value = s; };
   rec.onend = () => {
-    listening = false; $("mic").classList.remove("listening"); $("mic").textContent = "🎤";
+    listening = false;
+    if (micTarget === "fq") {
+      micTarget = "q"; $("fMic").classList.remove("listening"); $("fMic").textContent = "🎤";
+      $("fStatus").textContent = $("fq").value.trim() ? "Look right? Tap " + $("fGo").textContent + "." : (followMode === "more" ? "" : "Didn't catch that. Tap the mic and try again.");
+      return;
+    } $("mic").classList.remove("listening"); $("mic").textContent = "🎤";
     if ($("q").value.trim()) { $("hint").textContent = "Look right? Tap Ask. (Or tap the mic to try again.)"; $("go").classList.add("ready"); }
     else $("hint").textContent = "Didn't catch that. Tap the mic and try again.";
   };
-  rec.onerror = e => { if (e.error === "not-allowed" || e.error === "service-not-allowed") $("hint").textContent = "Microphone is blocked. Allow it in your browser, or type instead."; };
+  rec.onerror = e => { if (e.error === "not-allowed" || e.error === "service-not-allowed") $(micTarget === "fq" ? "fStatus" : "hint").textContent = "Microphone is blocked. Allow it in your browser, or type instead."; };
   $("mic").onclick = () => { unlock(); if (listening) { rec.stop(); return; } $("q").value = ""; $("go").classList.remove("ready"); startListening(); };
 }
 // If "Go deeper" is waiting, Ask uses what they typed or said (or goes deeper on everything when the box is empty)
@@ -323,6 +347,47 @@ function goAsk(){
 }
 $("go").onclick = goAsk;
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") goAsk(); });
+
+/* ---------- follow-up box (Ask about this / Go deeper) right under the buttons ---------- */
+let followMode = "", followTitle = "", followPrev = "";
+const WORKING = "⏳ Working on it… the professor is preparing your lecture.";
+function openFollow(mode, title, prev){
+  const clean = String(title || "").replace(/[?!.]+$/, "");
+  followMode = mode; followTitle = title; followPrev = prev;
+  $("fLabel").textContent = mode === "about" ? "What would you like to know about " + clean + "?" : "Which part of " + clean + " should we dig into?";
+  $("fq").placeholder = mode === "about" ? "Type your question, or tap the mic to say it…" : "Type a part, or leave it empty to go deeper on all of it";
+  $("fGo").textContent = mode === "about" ? "Ask" : "Go deeper"; $("fGo").disabled = false;
+  $("fq").value = ""; $("fStatus").textContent = "";
+  $("askAbout").classList.toggle("on", mode === "about"); $("goDeeper").classList.toggle("on", mode === "more");
+  $("followBox").classList.remove("hide");
+  $("fq").focus({ preventScroll: true });
+  try { $("followBox").scrollIntoView({ block: "nearest", behavior: "smooth" }); } catch(e) {}
+}
+function fListen(){
+  unlock();
+  if (!rec) { $("fq").focus(); $("fStatus").textContent = "Tap the 🎤 on your keyboard to speak, or just type."; return; }
+  if (listening) { rec.stop(); return; }
+  try { stopVoice(); micTarget = "fq"; $("fq").value = ""; rec.start(); listening = true; $("fMic").classList.add("listening"); $("fMic").textContent = "👂"; $("fStatus").textContent = "👂 Listening… ask your question."; } catch(e) {}
+}
+function sendFollow(){
+  unlock(); if (busy) return;
+  const text = $("fq").value.trim();
+  if (followMode === "about" && !text) { $("fStatus").textContent = "Type or say your question first."; $("fq").focus(); return; }
+  if (listening) { try { rec.stop(); } catch(e) {} }
+  if (course && !course.locked) endCourse();
+  $("fGo").disabled = true; $("fGo").textContent = "⏳"; $("fStatus").textContent = WORKING;
+  if (followMode === "about") ask(text, followTitle, { scroll: true });
+  else ask(text || "Go deeper on " + followTitle, followTitle, { more: true, prev: followPrev, scroll: true });
+}
+$("fGo").onclick = sendFollow;
+$("fq").addEventListener("keydown", e => { if (e.key === "Enter") sendFollow(); });
+$("fMic").onclick = fListen;
+// Brings the chalkboard into view. Inside the website frame, the page around it does the scrolling.
+function toBoard(){
+  const b = document.querySelector(".board-wrap");
+  if (window.parent !== window) { try { window.parent.postMessage({ type: "pp-scroll-top", y: b ? b.getBoundingClientRect().top + window.pageYOffset : 0 }, "*"); } catch(e) {} }
+  else { try { b.scrollIntoView({ behavior: "smooth", block: "start" }); } catch(e) {} }
+}
 
 /* ---------- asking: words and figures are fetched at the same time ---------- */
 const norm = s => s.toLowerCase().replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
@@ -442,10 +507,12 @@ async function ask(text, context, opts){
     ["playrow","side","deepCard"].forEach(id => $(id).classList.add("hide"));
     buildBoard([{ title: "", caption: "Try again", svg: blankCard() }]); showFigure(0);
     $("hint").textContent = "Tap Ask to try again.";
+    if (opts.scroll) toBoard();
     return;
   }
   lastQuestion = (!context && !opts.more) ? question : "";
   lesson = data; render(opts);
+  if (opts.scroll) toBoard();
   $("hint").textContent = "Ask another question anytime.";
   track("lecture", { topic: String(data.title || "").slice(0, 80), depth, type: data.type, course: course ? "yes" : "no" });
 
@@ -501,12 +568,13 @@ function render(opts){
     if (L.image_query) loadImage(L.image_query);
 
     const row = $("deeper"); row.innerHTML = "";
-    (L.deeper || []).slice(0, 3).forEach(q => { const b = document.createElement("button"); b.className = "chip"; b.textContent = q; b.onclick = () => { unlock(); ask(q, L.title); window.scrollTo({ top: 0, behavior: "smooth" }); }; row.appendChild(b); });
+    (L.deeper || []).slice(0, 3).forEach(q => { const b = document.createElement("button"); b.className = "chip"; b.textContent = q; b.onclick = () => { if (busy) return; unlock(); b.textContent = "⏳ " + q; $("fStatus").textContent = WORKING; ask(q, L.title, { scroll: true }); }; row.appendChild(b); });
     document.querySelector(".deeper .sub").classList.toggle("hide", !row.children.length);
     const prevSpeech = speech;
-    const readyBox = hintText => { $("q").value = ""; $("go").classList.add("ready"); $("hint").textContent = hintText; $("q").focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: "smooth" }); };
-    $("goDeeper").onclick = () => { unlock(); followUp = ""; pendingMore = { title: L.title, prev: prevSpeech }; readyBox("Which part of " + L.title + " should we dig into? Type it or tap the mic. Or just tap Ask to go deeper on all of it."); };
-    $("askAbout").onclick = () => { unlock(); pendingMore = null; followUp = L.title; readyBox("What would you like to know about " + L.title + "? Type your question or tap the mic to say it."); };
+    $("followBox").classList.add("hide"); $("fStatus").textContent = "";
+    $("askAbout").classList.remove("on"); $("goDeeper").classList.remove("on");
+    $("goDeeper").onclick = () => { unlock(); openFollow("more", L.title, prevSpeech); };
+    $("askAbout").onclick = () => { unlock(); openFollow("about", L.title, prevSpeech); };
     $("makeCourse").onclick = () => { unlock(); startCourse(L.title); };
     $("makeCourse").classList.toggle("hide", !!course);
     $("nextPart").classList.toggle("hide", !(course && course.idx < course.parts.length - 1));
@@ -541,8 +609,8 @@ function playPart(i){
   if (!course) return;
   course.idx = i; course.locked = true; saveCourse(); renderCourse();
   const p = course.parts[i];
-  ask(p.question).then(() => { if (course) course.locked = false; });
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (!$("deepCard").classList.contains("hide")) $("fStatus").textContent = WORKING;
+  ask(p.question, "", { scroll: true }).then(() => { if (course) course.locked = false; });
 }
 function endCourse(){ course = null; saveCourse(); renderCourse(); $("makeCourse").classList.remove("hide"); $("nextPart").classList.add("hide"); }
 function saveCourse(){ try { if (course) localStorage.setItem("lh_course", JSON.stringify({ title: course.title, parts: course.parts, idx: course.idx })); else localStorage.removeItem("lh_course"); } catch(e) {} }
