@@ -719,9 +719,41 @@ function drawGroup(g){
     });
   });
 }
+// Keeps words readable: a chalkboard-colored outline so they show over drawings, and words that overlap get nudged apart.
+function tidyText(g){
+  if (!g || g._tidy) return; g._tidy = true;
+  const texts = [...g.querySelectorAll("text")];
+  texts.forEach(el => { el.style.paintOrder = "stroke"; el.style.stroke = "#1f3a2e"; el.style.strokeWidth = "7px"; el.style.strokeLinejoin = "round"; });
+  const placed = [], pad = 4;
+  const hit = (a, b) => a.x < b.x + b.width + pad && b.x < a.x + a.width + pad && a.y < b.y + b.height + pad && b.y < a.y + a.height + pad;
+  const move = (el, dx, dy) => {
+    const kids = el.querySelectorAll("tspan[x],tspan[y]");
+    [el, ...kids].forEach(n => {
+      if (dx && n.hasAttribute("x")) n.setAttribute("x", (parseFloat(n.getAttribute("x")) || 0) + dx);
+      if (dy && n.hasAttribute("y")) n.setAttribute("y", (parseFloat(n.getAttribute("y")) || 0) + dy);
+    });
+  };
+  texts.forEach(el => {
+    let b; try { b = el.getBBox(); } catch(e) { return; }
+    if (!b.width) return;
+    if (b.x < 8) { move(el, 8 - b.x, 0); }
+    else if (b.x + b.width > 792) { move(el, 792 - b.x - b.width, 0); }
+    b = el.getBBox();
+    if (b.y + b.height > 494) move(el, 0, 494 - b.y - b.height);   // pull words back onto the board
+    else if (b.y < 6) move(el, 0, 6 - b.y);
+    for (let n = 0; n < 8; n++) {
+      b = el.getBBox();
+      const o = placed.find(p => hit(b, p)); if (!o) break;
+      let dy = o.y + o.height + pad + 2 - b.y;             // try just below the word it bumps into
+      if (b.y + dy + b.height > 496) dy = o.y - pad - 2 - b.height - b.y;   // no room below: go above
+      move(el, 0, dy);
+    }
+    try { placed.push(el.getBBox()); } catch(e) {}
+  });
+}
 function showFigure(i){
   if (i < 0 || i >= groups.length) return;
-  drawGroup(groups[i]); shown = i + 1;
+  drawGroup(groups[i]); tidyText(groups[i]); shown = i + 1;
   setCaption(i);
   updateCtrls();
 }
