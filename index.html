@@ -235,7 +235,7 @@ const NS = "http://www.w3.org/2000/svg";
 const STARTERS = ["How does inflation work?","Why did the Roman Empire fall?","How do vaccines train the immune system?","What causes the northern lights?","How does a jet engine work?","How do interest rates affect mortgages?","How does GPS know where you are?","What is quantum entanglement?","Why do we dream?","How did the printing press change the world?"];
 
 let lesson = null, busy = false, followUp = "", reqId = 0, lastQuestion = "", figs = [];
-let groups = [], shown = 0, manual = false, lastProgress = 0;
+let groups = [], shown = 0, manual = false, lastProgress = 0, boardStart = 0;
 let words = [], speech = "";
 let ctx = null, srcNode = null, lastAudio = null, raf = 0, voiceOff = false, speaking = false;
 let depth = "full", course = null;
@@ -374,8 +374,9 @@ async function ask(text, context, opts){
   $("thinking").classList.remove("on");
   figs = f && f.length ? f : [{ title: "", caption: "", svg: blankCard() }];
   buildBoard(figs);
-  if (lastProgress >= 1 || !speaking) { manual = true; showFigure(0); }
-  else onProgress(lastProgress);
+  // late figures always start at Fig. 1 and spread over the rest of the lecture
+  if (speaking && lastProgress < 0.85) { boardStart = lastProgress; onProgress(lastProgress); }
+  else { manual = true; showFigure(0); autoFlip(); }
 }
 
 /* ---------- render ---------- */
@@ -524,7 +525,7 @@ function sanitize(markup){
   return out;
 }
 function buildBoard(list){
-  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false; renderLegend([]);
+  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false; boardStart = 0; renderLegend([]);
   list.forEach(f => {
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
@@ -586,14 +587,21 @@ function renderLegend(list, formulas){
   box.classList.remove("hide");
 }
 function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0; }
-$("next").onclick = () => { manual = true; revealNext(); };
-$("prev").onclick = () => { manual = true; if (shown > 1) showFigure(shown - 2); };
-$("replay").onclick = () => { manual = true; if (shown > 0) showFigure(shown - 1); };
+$("next").onclick = () => { manual = true; flipStopped = true; revealNext(); };
+$("prev").onclick = () => { manual = true; flipStopped = true; if (shown > 1) showFigure(shown - 2); };
+$("replay").onclick = () => { manual = true; flipStopped = true; if (shown > 0) showFigure(shown - 1); };
 function onProgress(f){
   lastProgress = Math.max(lastProgress, f);
   if (manual) return;
-  while (shown < groups.length && f >= shown / groups.length) revealNext();
+  while (shown < groups.length && f >= boardStart + (1 - boardStart) * shown / groups.length) revealNext();
 }
+// after the talking is done, flip through the figures on a timer (stops if the reader takes over)
+function autoFlip(){
+  const mine = groups;
+  const step = () => { if (groups !== mine || shown >= groups.length || flipStopped) return; showFigure(shown); setTimeout(step, 6000); };
+  flipStopped = false; setTimeout(step, 6000);
+}
+let flipStopped = false;
 
 /* ---------- voice + read-along ---------- */
 function highlight(ci){
