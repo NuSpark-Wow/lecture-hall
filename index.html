@@ -714,6 +714,22 @@ try { const c = JSON.parse(localStorage.getItem("lh_course") || "null"); if (c &
 const params = new URLSearchParams(location.search);
 const sq = params.get("q");
 if (sq) { if (params.get("d") === "quick") setDepth("quick"); $("q").value = sq; ask(sq, "", { silent: true }); }
+
+/* ---------- auto-size: tell the host page how tall this tool is ---------- */
+(function(){
+  let last = 0;
+  function send(){
+    const w = document.querySelector(".wrap"); if (!w) return;
+    const h = Math.ceil(w.getBoundingClientRect().bottom + window.scrollY + 12);
+    if (Math.abs(h - last) < 4) return;
+    last = h;
+    try { if (window.parent !== window) window.parent.postMessage({ type: "pp-frame-height", h: h }, "*"); } catch(e) {}
+  }
+  try { new ResizeObserver(send).observe(document.body); } catch(e) {}
+  window.addEventListener("load", send);
+  setInterval(send, 1500);
+  send();
+})();
 })();
 </script>
 </body>
