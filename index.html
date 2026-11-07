@@ -122,6 +122,9 @@ button{font-family:inherit;cursor:pointer}
 .legend{margin:8px 4px 2px;padding:10px 12px;border-top:1px dashed rgba(255,255,255,.3);display:flex;flex-wrap:wrap;gap:6px 18px;color:#f5f3ea;font-size:14.5px;line-height:1.4}
 .legend .lt{width:100%;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#d9c9a8;font-weight:700}
 .legend b{font-family:Kalam,cursive;font-size:19px;color:#ffe08a;font-weight:700;margin-right:4px}
+.legend .fx{width:100%;display:flex;flex-direction:column;gap:6px;margin-top:4px}
+.legend .fx div{line-height:1.45}
+.legend .fx b{display:inline-block;margin-right:8px}
 .print-figs .plegend{font-size:12px;padding:0 10px 8px;color:#1d2329}
 
 /* Save as PDF / print */
@@ -310,7 +313,7 @@ $("q").addEventListener("keydown", e => { if (e.key === "Enter") { unlock(); if 
 const norm = s => s.toLowerCase().replace(/[?!.,]+/g, " ").replace(/\s+/g, " ").trim();
 async function fetchPart(part, question, context, opts){
   let r;
-  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&v=2&q=${encodeURIComponent(norm(question))}`);
+  if (!context && !opts.more) r = await fetch(`/api/ask?part=${part}&depth=${depth}&v=3&q=${encodeURIComponent(norm(question))}`);
   else r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" },
     body: JSON.stringify({ part, question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
   const d = await r.json().catch(() => null);
@@ -483,7 +486,8 @@ window.addEventListener("beforeprint", () => {
     const g = sanitize(f.svg || ""); if (g) svg.appendChild(g);
     const cap = document.createElement("figcaption"); cap.textContent = [f.title, f.caption].filter(Boolean).join(": ");
     fig.appendChild(svg); fig.appendChild(cap);
-    if (Array.isArray(f.legend) && f.legend.length) { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = f.legend.map(l => l.symbol + " = " + l.meaning).join("  ·  "); fig.appendChild(lg); }
+    if (Array.isArray(f.legend) && f.legend.length) { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = "Symbols: " + f.legend.map(l => l.symbol + " = " + l.meaning).join("  ·  "); fig.appendChild(lg); }
+    (Array.isArray(f.formulas) ? f.formulas : []).forEach(x => { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = x.formula + ": " + x.explanation; fig.appendChild(lg); });
     box.appendChild(fig);
   });
 });
@@ -523,6 +527,7 @@ function buildBoard(list){
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
     g._legend = Array.isArray(f.legend) ? f.legend : [];
+    g._formulas = Array.isArray(f.formulas) ? f.formulas : [];
     svg.appendChild(g); groups.push(g);
   });
   svg.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
@@ -558,15 +563,24 @@ function showFigure(i){
   const g = groups[i], cap = $("caption"); cap.innerHTML = "";
   if (g.dataset.title) { const b = document.createElement("b"); b.textContent = g.dataset.title + (groups.length > 1 ? ` (${i + 1} of ${groups.length}) ` : " "); cap.appendChild(b); }
   cap.appendChild(document.createTextNode(g.dataset.caption || ""));
-  renderLegend(g._legend);
+  renderLegend(g._legend, g._formulas);
   updateCtrls();
 }
 function revealNext(){ if (shown < groups.length) showFigure(shown); }
-function renderLegend(list){
+function renderLegend(list, formulas){
   const box = $("legend"); box.innerHTML = "";
-  if (!list || !list.length) { box.classList.add("hide"); return; }
-  const tt = document.createElement("div"); tt.className = "lt"; tt.textContent = "Symbols on this figure"; box.appendChild(tt);
-  list.forEach(l => { const d = document.createElement("span"); const b = document.createElement("b"); b.textContent = l.symbol; d.appendChild(b); d.appendChild(document.createTextNode("= " + l.meaning)); box.appendChild(d); });
+  list = list || []; formulas = formulas || [];
+  if (!list.length && !formulas.length) { box.classList.add("hide"); return; }
+  if (list.length) {
+    const tt = document.createElement("div"); tt.className = "lt"; tt.textContent = "Symbols on this figure"; box.appendChild(tt);
+    list.forEach(l => { const d = document.createElement("span"); const b = document.createElement("b"); b.textContent = l.symbol; d.appendChild(b); d.appendChild(document.createTextNode("= " + l.meaning)); box.appendChild(d); });
+  }
+  if (formulas.length) {
+    const tt = document.createElement("div"); tt.className = "lt"; tt.textContent = "Formulas explained"; tt.style.marginTop = list.length ? "8px" : "0"; box.appendChild(tt);
+    const fx = document.createElement("div"); fx.className = "fx";
+    formulas.forEach(f => { const d = document.createElement("div"); const b = document.createElement("b"); b.textContent = f.formula; d.appendChild(b); d.appendChild(document.createTextNode(f.explanation)); fx.appendChild(d); });
+    box.appendChild(fx);
+  }
   box.classList.remove("hide");
 }
 function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0; }
