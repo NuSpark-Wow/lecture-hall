@@ -235,7 +235,7 @@ const NS = "http://www.w3.org/2000/svg";
 const STARTERS = ["How does inflation work?","Why did the Roman Empire fall?","How do vaccines train the immune system?","What causes the northern lights?","How does a jet engine work?","How do interest rates affect mortgages?","How does GPS know where you are?","What is quantum entanglement?","Why do we dream?","How did the printing press change the world?"];
 
 let lesson = null, busy = false, followUp = "", reqId = 0, lastQuestion = "", figs = [];
-let groups = [], shown = 0, manual = false, lastProgress = 0, boardStart = 0;
+let groups = [], shown = 0, manual = false, lastProgress = 0, boardStart = 0, boardOff = false, lastReveal = 0, pumpTimer = 0, liveBoard = false, boardDone = true;
 let words = [], speech = "";
 let ctx = null, srcNode = null, lastAudio = null, raf = 0, voiceOff = false, speaking = false;
 let depth = "full", course = null;
@@ -321,6 +321,53 @@ async function fetchPart(part, question, context, opts){
   const d = await r.json().catch(() => null);
   return { ok: r.ok, status: r.status, d };
 }
+// Reads the figures as they stream in: one finished figure per line, shown right away.
+async function streamBoard(question, context, opts, onFig){
+  let r;
+  if (!context && !opts.more) r = await fetch(`/api/ask?part=board&depth=${depth}&v=4&q=${encodeURIComponent(norm(question))}`);
+  else r = await fetch("/api/ask", { method:"POST", headers:{ "content-type":"application/json" },
+    body: JSON.stringify({ part: "board", question, depth, context: context || "", more: !!opts.more, prev: opts.prev || "" }) });
+  if (!r.ok) throw new Error("H" + r.status);
+  let n = 0, buf = "";
+  const handle = line => {
+    if (!line.trim()) return;
+    let o; try { o = JSON.parse(line); } catch(e) { return; }
+    if (Array.isArray(o.figures)) o.figures.forEach(f => { n++; onFig(f); });
+    else if (Array.isArray(o.steps)) o.steps.forEach(f => { n++; onFig(f); });
+    else if (o.svg !== undefined) { n++; onFig(o); }
+  };
+  if (r.body && r.body.getReader) {
+    const reader = r.body.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n")) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
+    }
+    handle(buf);
+  } else (await r.text()).split("\n").forEach(handle);
+  return n;
+}
+// Adds a figure; the first shows right away, later ones at most every 7 seconds.
+function addFig(f){
+  figs.push(f);
+  const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
+  g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
+  g._legend = Array.isArray(f.legend) ? f.legend : []; g._formulas = Array.isArray(f.formulas) ? f.formulas : [];
+  g.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
+  $("svg").appendChild(g); groups.push(g);
+  $("thinking").classList.remove("on");
+  updateCtrls(); pump();
+}
+function pump(){
+  clearTimeout(pumpTimer);
+  if (manual || shown >= groups.length) return;
+  const wait = lastReveal ? lastReveal + 7000 - Date.now() : 0;
+  if (wait > 0) { pumpTimer = setTimeout(pump, wait); return; }
+  revealNext(); lastReveal = Date.now();
+  if (shown < groups.length) pumpTimer = setTimeout(pump, 7000);
+}
+
 async function ask(text, context, opts){
   opts = opts || {};
   if (!context && followUp) context = followUp;
@@ -333,11 +380,16 @@ async function ask(text, context, opts){
   stopVoice(); $("thinkText").textContent = "Thinking..."; $("thinking").classList.add("on");
   $("hint").textContent = "Preparing your lecture…";
 
+  // figures start right away and appear one by one as each is ready
+  boardOff = false; lastReveal = 0; clearTimeout(pumpTimer); figs = [];
+  buildBoard([]); liveBoard = true; boardDone = false;
   const boardP = (async () => {
-    for (let a = 0; a < 2; a++) {
-      try { const x = await fetchPart("board", question, context, opts); if (x.d && Array.isArray(x.d.figures)) return x.d.figures; } catch(e) {}
+    let total = 0;
+    for (let a = 0; a < 2 && total === 0; a++) {
+      try { total += await streamBoard(question, context, opts, f => { if (my === reqId && !boardOff) addFig(f); }); }
+      catch(e) {}
     }
-    return null;
+    return total;
   })();
 
   let data = null, reason = "N0";
@@ -352,7 +404,7 @@ async function ask(text, context, opts){
   if (my !== reqId) return;
   busy = false; $("go").disabled = false;
   if (!data) {
-    lesson = null; stopVoice(); $("thinking").classList.remove("on");
+    lesson = null; stopVoice(); boardOff = true; clearTimeout(pumpTimer); $("thinking").classList.remove("on");
     $("title").textContent = "The chalk broke.";
     $("read").innerHTML = "<p>Something went wrong. Please ask your question again.</p>";
     const code = document.createElement("p"); code.style.cssText = "font-size:12px;color:#98a1a9;font-family:Inter,sans-serif";
@@ -367,16 +419,13 @@ async function ask(text, context, opts){
   $("hint").textContent = "Ask another question anytime.";
   track("lecture", { topic: String(data.title || "").slice(0, 80), depth, type: data.type, course: course ? "yes" : "no" });
 
-  if (data.type !== "lecture") { $("thinking").classList.remove("on"); return; }
-  $("thinkText").textContent = "Drawing the figures...";
-  const f = await boardP;
+  if (data.type !== "lecture") { boardOff = true; $("thinking").classList.remove("on"); return; }
+  if (!groups.length) $("thinkText").textContent = "Drawing the figures...";
+  const total = await boardP;
   if (my !== reqId) return;
-  $("thinking").classList.remove("on");
-  figs = f && f.length ? f : [{ title: "", caption: "", svg: blankCard() }];
-  buildBoard(figs);
-  // late figures always start at Fig. 1 and spread over the rest of the lecture
-  if (speaking && lastProgress < 0.85) { boardStart = lastProgress; onProgress(lastProgress); }
-  else { manual = true; showFigure(0); autoFlip(); }
+  boardDone = true; $("thinking").classList.remove("on");
+  if (!total && !groups.length) { boardOff = true; figs = [{ title: "", caption: "", svg: blankCard() }]; buildBoard(figs); showFigure(0); }
+  else if (shown > 0) setCaption(shown - 1);
 }
 
 /* ---------- render ---------- */
@@ -400,9 +449,7 @@ function render(opts){
   $("thumbs").classList.toggle("hide", !isLec); $("share").classList.toggle("hide", !isLec); $("pdf").classList.toggle("hide", !isLec);
   $("helpful").textContent = "Helpful?"; $("up").disabled = false; $("down").disabled = false;
 
-  figs = [];
-  if (isLec) buildBoard([]);
-  else { buildBoard([{ title: "", caption: L.type === "help" ? "You matter." : "Ask another question.", svg: blankCard() }]); showFigure(0); }
+  if (!isLec) { boardOff = true; clearTimeout(pumpTimer); figs = []; buildBoard([{ title: "", caption: L.type === "help" ? "You matter." : "Ask another question.", svg: blankCard() }]); showFigure(0); }
 
   ["side","termsCard","imgCard","factCard","mythCard","deepCard"].forEach(id => $(id).classList.add("hide"));
   if (isLec) {
@@ -525,7 +572,7 @@ function sanitize(markup){
   return out;
 }
 function buildBoard(list){
-  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false; boardStart = 0; renderLegend([]);
+  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false; boardStart = 0; liveBoard = false; boardDone = true; renderLegend([]);
   list.forEach(f => {
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
@@ -563,11 +610,16 @@ function drawGroup(g){
 function showFigure(i){
   if (i < 0 || i >= groups.length) return;
   drawGroup(groups[i]); shown = i + 1;
-  const g = groups[i], cap = $("caption"); cap.innerHTML = "";
-  if (g.dataset.title) { const b = document.createElement("b"); b.textContent = g.dataset.title + (groups.length > 1 ? ` (${i + 1} of ${groups.length}) ` : " "); cap.appendChild(b); }
+  setCaption(i);
+  updateCtrls();
+}
+// "(1 of 3)" only once we know how many figures there are
+function setCaption(i){
+  const g = groups[i], cap = $("caption"); if (!g) return; cap.innerHTML = "";
+  const count = groups.length > 1 && (!liveBoard || boardDone) ? ` (${i + 1} of ${groups.length}) ` : " ";
+  if (g.dataset.title) { const b = document.createElement("b"); b.textContent = g.dataset.title + count; cap.appendChild(b); }
   cap.appendChild(document.createTextNode(g.dataset.caption || ""));
   renderLegend(g._legend, g._formulas);
-  updateCtrls();
 }
 function revealNext(){ if (shown < groups.length) showFigure(shown); }
 function renderLegend(list, formulas){
@@ -590,11 +642,7 @@ function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = sh
 $("next").onclick = () => { manual = true; flipStopped = true; revealNext(); };
 $("prev").onclick = () => { manual = true; flipStopped = true; if (shown > 1) showFigure(shown - 2); };
 $("replay").onclick = () => { manual = true; flipStopped = true; if (shown > 0) showFigure(shown - 1); };
-function onProgress(f){
-  lastProgress = Math.max(lastProgress, f);
-  if (manual) return;
-  while (shown < groups.length && f >= boardStart + (1 - boardStart) * shown / groups.length) revealNext();
-}
+function onProgress(f){ lastProgress = Math.max(lastProgress, f); }
 // after the talking is done, flip through the figures on a timer (stops if the reader takes over)
 function autoFlip(){
   const mine = groups;
