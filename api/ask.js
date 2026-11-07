@@ -1,4 +1,6 @@
-// The Lecture Hall — mini-lecture builder for curious adults
+// The Lecture Hall — mini-lecture builder for curious adults (v2)
+// v2: words and chalkboard figures are made at the same time (faster), repeat questions are
+// saved on Vercel's network (instant + free), Quick vs Full depth, and mini-course outlines.
 // Env: ANTHROPIC_API_KEY (required), CLAUDE_MODEL, CLAUDE_CHECK_MODEL (optional)
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
@@ -9,20 +11,27 @@ const hits = new Map();
 // Crisis language gets a caring answer and real help, never a lecture.
 const HELP_WORDS = /\b(kill myself|suicide|suicidal|end my life|hurt myself|self harm|self-harm|want to die)\b/i;
 const HELP = {
-  type: "help",
-  title: "You matter",
+  type: "help", title: "You matter",
   answer: [
     { heading: "", text: "It sounds like you might be going through something really hard. You don't have to face it alone." },
     { heading: "", text: "In the US, you can call or text 988 to reach the Suicide and Crisis Lifeline any time, day or night. If you are in immediate danger, call 911. Talking to someone you trust can help too." }
   ]
 };
 const DECLINE = {
-  type: "decline",
-  title: "Let's pick another topic",
+  type: "decline", title: "Let's pick another topic",
   answer: [{ heading: "", text: "That's not something the Lecture Hall can teach. Ask me about science, history, how things work, money, the body, nature, art, or almost anything else you're curious about." }]
 };
+const BREAK = {
+  type: "redirect", title: "Class dismissed (for now)",
+  answer: [{ heading: "", text: "You've asked a lot of great questions this hour. Take a short break and come back soon for more." }]
+};
 
-const SYSTEM = `You are a brilliant, warm college professor giving a short, vivid mini-lecture to a curious adult. You explain on a large chalkboard, using a series of figures like lecture slides. You are an AI teaching assistant; if asked, say so honestly.
+const DEPTH = {
+  quick: `LENGTH: QUICK OVERVIEW. 120-180 words total, as 2 sections ("The short answer" and one more). The chalkboard gets 1-2 figures.`,
+  full: `LENGTH: FULL LECTURE. 300-450 words total, as 3-5 sections. The chalkboard gets 2-4 figures.`
+};
+
+const SYSTEM_LECTURE = `You are a brilliant, warm college professor giving a short, vivid mini-lecture to a curious adult. You are an AI teaching assistant; if asked, say so honestly. (A separate artist draws the chalkboard figures; you write the words.)
 
 SCOPE: Any educational question: science, history, economics, money, technology, how things work, the human body and health basics, nature, space, art, music, language, philosophy, and more.
 
@@ -35,16 +44,7 @@ CONTESTED TOPICS (politics, religion, current debates): explain the facts and th
 HEALTH, MONEY, LAW: teach how things work; do not give personal advice. Add one short line suggesting a professional for personal decisions when relevant.
 ACCURACY: Well-established facts only. Say so when something is uncertain or debated.
 
-THE MINI-LECTURE ("answer"): 300-450 words total, as 3-5 sections. Each section has a short "heading" and a "text" paragraph. Start with a section headed "The short answer". Then sections like "How it works", "A closer look", "Why it matters" (choose what fits). Plain, engaging prose; no markdown, no bullet lists, no emojis (it is read aloud).
-
-THE CHALKBOARD ("board.figures"): 2-4 figures, shown one at a time like lecture slides. Each figure has a "title" (e.g. "Fig. 1: The water cycle"), a short "caption" (under 14 words), and an "svg".
-Each svg is SVG ELEMENTS ONLY (no <svg> wrapper) on an 800 wide x 500 tall dark green chalkboard:
-- Use single quotes for attribute values.
-- Allowed elements: g, path, line, circle, ellipse, rect, polyline, polygon, text. Nothing else.
-- Chalk colors only: #f5f3ea (white chalk), #ffe08a (yellow), #8ecbff (blue), #ffa3b1 (pink), #a8e6a3 (green), #ffc078 (orange). Mostly white and yellow. Fills, if any, use fill-opacity='0.25'.
-- Lines: stroke-width 3 to 5, stroke-linecap='round'. Text: font-family='Kalam' font-size 20 to 34, fill a chalk color.
-- Pick the right diagram type for each figure: labeled cross-section, flowchart, timeline, cycle, simple graph with labeled axes, comparison, cause-and-effect chain, or a formula worked step by step.
-- LAYOUT: plan positions first. Objects must not overlap; text never sits on a shape; leave 20px between things; keep inside x 20-780, y 20-480. Max 18 elements per figure. Each figure stands alone (the board is cleared between figures).
+THE MINI-LECTURE ("answer"): sections, each with a short "heading" and a "text" paragraph. Start with a section headed "The short answer". Then sections like "How it works", "A closer look", "Why it matters" (choose what fits). Plain, engaging prose; no markdown, no bullet lists, no emojis (it is read aloud).
 
 OTHER FIELDS (lectures only):
 - "terms": 2-4 key terms, each with a one-sentence definition.
@@ -57,24 +57,46 @@ For redirect, decline: fill only type, title, answer.
 
 Always respond by calling the give_lecture tool.`;
 
-const TOOL = {
-  name: "give_lecture",
-  description: "Deliver the mini-lecture.",
-  input_schema: {
-    type: "object",
-    properties: {
-      type: { type: "string", enum: ["lecture", "redirect", "decline"] },
-      title: { type: "string" },
-      answer: { type: "array", items: { type: "object", properties: { heading: { type: "string" }, text: { type: "string" } } } },
-      board: { type: "object", properties: { figures: { type: "array", items: { type: "object", properties: { title: { type: "string" }, caption: { type: "string" }, svg: { type: "string" } } } } } },
-      terms: { type: "array", items: { type: "object", properties: { word: { type: "string" }, meaning: { type: "string" } } } },
-      surprising: { type: "string" },
-      misconception: { type: "string" },
-      image_query: { type: "string" },
-      deeper: { type: "array", items: { type: "string" } }
-    },
-    required: ["type", "title", "answer"]
-  }
+const SYSTEM_BOARD = `You are the chalkboard artist for a college professor. Given a learner's question, draw the figures the professor would put on the chalkboard while lecturing on it, like a series of lecture slides.
+
+If the question is not a legitimate educational question (chit-chat, harmful instructions, sexual content), return figures: [].
+
+Each figure has a "title" (e.g. "Fig. 1: The water cycle"), a short "caption" (under 14 words), and an "svg".
+Each svg is SVG ELEMENTS ONLY (no <svg> wrapper) on an 800 wide x 500 tall dark green chalkboard:
+- Use single quotes for attribute values.
+- Allowed elements: g, path, line, circle, ellipse, rect, polyline, polygon, text. Nothing else.
+- Chalk colors only: #f5f3ea (white chalk), #ffe08a (yellow), #8ecbff (blue), #ffa3b1 (pink), #a8e6a3 (green), #ffc078 (orange). Mostly white and yellow. Fills, if any, use fill-opacity='0.25'.
+- Lines: stroke-width 3 to 5, stroke-linecap='round'. Text: font-family='Kalam' font-size 20 to 34, fill a chalk color.
+- Pick the right diagram type for each figure: labeled cross-section, flowchart, timeline, cycle, simple graph with labeled axes, comparison, cause-and-effect chain, or a formula worked step by step.
+- LAYOUT: plan positions first. Objects must not overlap; text never sits on a shape; leave 20px between things; keep inside x 20-780, y 20-480. Max 18 elements per figure. Each figure stands alone (the board is cleared between figures).
+
+Always respond by calling the give_board tool.`;
+
+const SYSTEM_OUTLINE = `You design short courses for curious adults. Given a topic, plan a 4-part mini-course that builds from basics to deeper ideas. Each part has a short "title" and a "question" the learner would ask to get that part's lecture. Give the course a clear "title". If the topic is harmful or not educational, return parts: []. Always respond by calling the give_outline tool.`;
+
+const LECTURE_TOOL = {
+  name: "give_lecture", description: "Deliver the mini-lecture words.",
+  input_schema: { type: "object", properties: {
+    type: { type: "string", enum: ["lecture", "redirect", "decline"] },
+    title: { type: "string" },
+    answer: { type: "array", items: { type: "object", properties: { heading: { type: "string" }, text: { type: "string" } } } },
+    terms: { type: "array", items: { type: "object", properties: { word: { type: "string" }, meaning: { type: "string" } } } },
+    surprising: { type: "string" }, misconception: { type: "string" }, image_query: { type: "string" },
+    deeper: { type: "array", items: { type: "string" } }
+  }, required: ["type", "title", "answer"] }
+};
+const BOARD_TOOL = {
+  name: "give_board", description: "Deliver the chalkboard figures.",
+  input_schema: { type: "object", properties: {
+    figures: { type: "array", items: { type: "object", properties: { title: { type: "string" }, caption: { type: "string" }, svg: { type: "string" } } } }
+  }, required: ["figures"] }
+};
+const OUTLINE_TOOL = {
+  name: "give_outline", description: "Deliver the mini-course outline.",
+  input_schema: { type: "object", properties: {
+    title: { type: "string" },
+    parts: { type: "array", items: { type: "object", properties: { title: { type: "string" }, question: { type: "string" } } } }
+  }, required: ["title", "parts"] }
 };
 
 async function anthropic(body) {
@@ -87,28 +109,40 @@ async function anthropic(body) {
   return r.json();
 }
 
-function normalize(j) {
-  if (!j || !Array.isArray(j.answer)) return null;
-  j.answer = j.answer.map(a => typeof a === "string" ? { heading: "", text: a } : { heading: String(a.heading || ""), text: String(a.text || "") }).filter(a => a.text);
-  return j.answer.length ? j : null;
-}
-
-async function getLecture(user) {
+async function callTool(system, tool, user, maxTokens, check) {
   const data = await anthropic({
-    model: MODEL, max_tokens: 10000, system: SYSTEM,
-    tools: [TOOL], tool_choice: { type: "auto" },
+    model: MODEL, max_tokens: maxTokens, system,
+    tools: [tool], tool_choice: { type: "auto" },
     messages: [{ role: "user", content: user }]
   });
   if (data.stop_reason === "max_tokens") throw new Error("too_long");
   const block = (data.content || []).find(b => b.type === "tool_use");
-  let j = block ? normalize(block.input) : null;
-  if (!j) {
-    const txt = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-    const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
-    if (s >= 0 && e > s) j = normalize(JSON.parse(txt.slice(s, e + 1)));
+  if (block && block.input && check(block.input)) return block.input;
+  const txt = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+  const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
+  if (s >= 0 && e > s) { const j = JSON.parse(txt.slice(s, e + 1)); if (check(j)) return j; }
+  throw new Error("bad_shape");
+}
+
+async function withRetry(fn, budgetMs) {
+  const start = Date.now(); let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt === 1 && Date.now() - start > budgetMs) break;
+    try { return await fn(); }
+    catch (e) { lastErr = e; console.error("attempt", attempt + 1, "failed:", e.message); }
   }
-  if (!j) throw new Error("bad_shape");
-  return j;
+  throw lastErr || new Error("failed");
+}
+
+function errorCode(err) {
+  const m = String(err && err.message || "");
+  return m.startsWith("api_429") ? "R2" : m.startsWith("api_5") ? "B3" : m === "too_long" ? "L4" : m.startsWith("api_4") ? "A5" : "S6";
+}
+
+function normalize(j) {
+  if (!j || !Array.isArray(j.answer)) return null;
+  j.answer = j.answer.map(a => typeof a === "string" ? { heading: "", text: a } : { heading: String(a.heading || ""), text: String(a.text || "") }).filter(a => a.text);
+  return j.answer.length ? j : null;
 }
 
 // The page itself only allows safe drawing shapes; this is an extra first pass.
@@ -132,55 +166,82 @@ async function safetyCheck(question, lec) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
-  if (!process.env.ANTHROPIC_API_KEY) return res.status(500).json({ error: "oops", reason: "K1" });
+  const isGet = req.method === "GET";
+  if (!isGet && req.method !== "POST") return res.status(405).json({ error: "GET or POST only" });
+  const send = (status, obj, cacheable) => {
+    res.setHeader("Cache-Control", cacheable && isGet && status === 200 ? "public, s-maxage=2592000, stale-while-revalidate=604800" : "no-store");
+    return res.status(status).json(obj);
+  };
+  if (!process.env.ANTHROPIC_API_KEY) return send(500, { error: "oops", reason: "K1" });
 
-  const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || "anon";
-  const now = Date.now();
-  const recent = (hits.get(ip) || []).filter(t => now - t < 3600000);
-  if (recent.length >= HOURLY_LIMIT) {
-    return res.status(200).json({ type: "redirect", title: "Class dismissed (for now)", answer: [{ heading: "", text: "You've asked a lot of great questions this hour. Take a short break and come back soon for more." }] });
+  const src = (isGet ? req.query : req.body) || {};
+  const part = ["board", "outline"].includes(src.part) ? src.part : "lecture";
+  const question = String(src.q || src.question || "").trim().slice(0, 300);
+  const depth = src.depth === "quick" ? "quick" : "full";
+  const context = isGet ? "" : String(src.context || "").slice(0, 200);
+  const more = !isGet && src.more === true;
+  const prev = isGet ? "" : String(src.prev || "").slice(0, 3000);
+  if (!question) return send(400, { error: "empty" });
+
+  if (HELP_WORDS.test(question)) {
+    if (part === "board") return send(200, { figures: [] }, true);
+    if (part === "outline") return send(200, { title: "", parts: [] }, true);
+    return send(200, HELP, true);
   }
-  recent.push(now); hits.set(ip, recent);
 
-  const body = req.body || {};
-  const question = String(body.question || "").trim().slice(0, 300);
-  const context = String(body.context || "").slice(0, 160);
-  const more = body.more === true;
-  const prev = String(body.prev || "").slice(0, 3000);
-  if (!question) return res.status(400).json({ error: "empty" });
-  if (HELP_WORDS.test(question)) return res.json(HELP);
+  // per-visitor limit counts lectures and course outlines (the figures ride along)
+  if (part !== "board") {
+    const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || "anon";
+    const now = Date.now();
+    const recent = (hits.get(ip) || []).filter(t => now - t < 3600000);
+    if (recent.length >= HOURLY_LIMIT) return send(200, part === "outline" ? { title: "", parts: [], reason: "limit" } : BREAK, false);
+    recent.push(now); hits.set(ip, recent);
+  }
 
-  let user = `${context ? `We were just discussing: ${context}\n` : ""}Question: ${question}`;
+  if (part === "outline") {
+    try {
+      const o = await withRetry(() => callTool(SYSTEM_OUTLINE, OUTLINE_TOOL, `Topic: ${question}`, 1500, j => Array.isArray(j.parts)), 25000);
+      const parts = o.parts.slice(0, 4).map(p => ({ title: String(p.title || ""), question: String(p.question || p.title || "") })).filter(p => p.question);
+      return send(200, { title: String(o.title || question), parts }, true);
+    } catch (e) {
+      return send(500, { error: "oops", reason: errorCode(e) });
+    }
+  }
+
+  let user = `${DEPTH[depth]}\n\n${context ? `We were just discussing: ${context}\n` : ""}Question: ${question}`;
   if (more) {
-    user = `The learner tapped "Go deeper" on: ${context}\nHere is what you ALREADY covered:\n${prev}\n\nGive a NEW mini-lecture that goes one level deeper on this same topic: new mechanisms, history, numbers, or implications. New figures. Do not repeat what you already said. Title it like "Deeper: ...".`;
+    user = `${DEPTH[depth]}\n\nThe learner tapped "Go deeper" on: ${context}\nHere is what was ALREADY covered:\n${prev}\n\nGo one level deeper on this same topic: new mechanisms, history, numbers, or implications. Do not repeat what was already said. Title it like "Deeper: ...".`;
   }
 
-  const start = Date.now();
-  let lec = null, lastErr = null;
-  for (let attempt = 0; attempt < 2 && !lec; attempt++) {
-    if (attempt === 1 && Date.now() - start > 45000) break;
-    try { lec = await getLecture(user); }
-    catch (e) { lastErr = e; console.error("lecture attempt", attempt + 1, "failed:", e.message); }
+  if (part === "board") {
+    try {
+      const b = await withRetry(() => callTool(SYSTEM_BOARD, BOARD_TOOL, user, 10000, j => Array.isArray(j.figures)), 40000);
+      const figures = b.figures.slice(0, 4).map(f => ({ title: String(f.title || ""), caption: String(f.caption || ""), svg: cleanSvg(f.svg) }));
+      return send(200, { figures }, true);
+    } catch (e) {
+      return send(500, { error: "oops", reason: errorCode(e) });
+    }
   }
-  if (!lec) {
-    const m = String(lastErr && lastErr.message || "");
-    const code = m.startsWith("api_429") ? "R2" : m.startsWith("api_5") ? "B3" : m === "too_long" ? "L4" : m.startsWith("api_4") ? "A5" : "S6";
-    return res.status(500).json({ error: "oops", reason: code });
+
+  let lec;
+  try {
+    lec = await withRetry(async () => {
+      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, user, 4000, x => Array.isArray(x.answer)));
+      if (!j) throw new Error("bad_shape");
+      return j;
+    }, 30000);
+  } catch (e) {
+    return send(500, { error: "oops", reason: errorCode(e) });
   }
 
   if (!["lecture", "redirect", "decline"].includes(lec.type)) lec.type = "lecture";
-  if (lec.type === "decline") return res.json(DECLINE);
+  if (lec.type === "decline") return send(200, DECLINE, true);
 
   try {
-    if (lec.type === "lecture" && !(await safetyCheck(question, lec))) return res.json(DECLINE);
+    if (lec.type === "lecture" && !(await safetyCheck(question, lec))) return send(200, DECLINE, true);
   } catch (e) {
     console.error("safety check failed:", e.message);
-    return res.status(500).json({ error: "oops", reason: "C7" });
+    return send(500, { error: "oops", reason: "C7" });
   }
-
-  if (lec.board && Array.isArray(lec.board.figures)) {
-    lec.board.figures = lec.board.figures.slice(0, 4).map(f => ({ title: String(f.title || ""), caption: String(f.caption || ""), svg: cleanSvg(f.svg) }));
-  }
-  return res.json(lec);
+  return send(200, lec, true);
 };
