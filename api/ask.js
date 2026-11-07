@@ -78,6 +78,19 @@ Always respond by calling the give_board tool.`;
 
 const SYSTEM_OUTLINE = `You design short courses for curious adults. Given a topic, plan a 4-part mini-course that builds from basics to deeper ideas. Each part has a short "title" and a "question" the learner would ask to get that part's lecture. Give the course a clear "title". If the topic is harmful or not educational, return parts: []. Always respond by calling the give_outline tool.`;
 
+// Live drawing: the artist writes one figure at a time in this plain format,
+// and each finished figure is sent to the page right away.
+const STREAM_FORMAT = `OUTPUT FORMAT (IMPORTANT): plain text only, no JSON, no tools. Write each figure as its own block, in order, exactly like this:
+=== STEP
+TITLE: Fig. 1: the figure title
+CAPTION: the short caption
+SVG: all of this figure's svg elements on ONE line
+LEGEND: symbol | meaning ;; symbol | meaning
+FORMULAS: formula | explanation ;; formula | explanation
+=== END
+Leave LEGEND or FORMULAS empty when there are none. Write nothing before the first block or after the last one. If the question is not appropriate, write only: === NONE`;
+const SYSTEM_BOARD_STREAM = SYSTEM_BOARD.replace("Always respond by calling the give_board tool.", STREAM_FORMAT);
+
 const LECTURE_TOOL = {
   name: "give_lecture", description: "Deliver the mini-lecture words.",
   input_schema: { type: "object", properties: {
@@ -126,6 +139,82 @@ async function callTool(system, tool, user, maxTokens, check, model) {
   const s = txt.indexOf("{"), e = txt.lastIndexOf("}");
   if (s >= 0 && e > s) { const j = JSON.parse(txt.slice(s, e + 1)); if (check(j)) return j; }
   throw new Error("bad_shape");
+}
+
+async function streamClaude(system, user, maxTokens, model, onText) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, stream: true, messages: [{ role: "user", content: user }] })
+  });
+  if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error("api_" + r.status + " " + t.slice(0, 200)); }
+  const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const ev = buf.slice(0, i); buf = buf.slice(i + 2);
+      for (const line of ev.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        let d; try { d = JSON.parse(line.slice(5)); } catch (e) { continue; }
+        if (d.type === "content_block_delta" && d.delta && d.delta.type === "text_delta") onText(d.delta.text);
+        if (d.type === "error") throw new Error("api_529 " + JSON.stringify(d.error || {}).slice(0, 120));
+      }
+    }
+  }
+}
+
+function pairs(str, maxA, maxB, limit) {
+  return String(str || "").split(";;").map(x => x.split("|")).filter(p => p.length >= 2)
+    .map(p => [p[0].trim().slice(0, maxA), p.slice(1).join("|").trim().slice(0, maxB)]).filter(p => p[0] && p[1]).slice(0, limit);
+}
+function parseBlock(block) {
+  const f = { TITLE: "", CAPTION: "", SVG: "", LEGEND: "", FORMULAS: "" }; let key = null;
+  for (const raw of block.split("\n")) {
+    const m = raw.match(/^\s*(TITLE|CAPTION|SVG|LEGEND|FORMULAS)\s*:\s*(.*)$/);
+    if (m) { key = m[1]; f[key] = m[2]; }
+    else if (key && raw.trim()) f[key] += " " + raw.trim();
+  }
+  return { title: f.TITLE.trim(), caption: f.CAPTION.trim(), svg: cleanSvg(f.SVG.trim()),
+    legend: pairs(f.LEGEND, 20, 160, 10).map(([symbol, meaning]) => ({ symbol, meaning })),
+    formulas: pairs(f.FORMULAS, 80, 400, 4).map(([formula, explanation]) => ({ formula, explanation })) };
+}
+
+// Streams drawing steps to the page as newline-separated JSON, one finished step per line.
+async function streamBoard(res, isGet, user, maxSteps, kidsLimits) {
+  let wrote = false, count = 0, text = "", lastErr = null, none = false;
+  const start = () => {
+    if (wrote) return; wrote = true;
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+    res.setHeader("Cache-Control", isGet ? "public, s-maxage=2592000, stale-while-revalidate=604800" : "no-store");
+    res.setHeader("X-Accel-Buffering", "no");
+  };
+  const flush = () => {
+    if (text.includes("=== NONE")) none = true;
+    let a, b;
+    while ((a = text.indexOf("=== STEP")) >= 0 && (b = text.indexOf("=== END", a)) >= 0) {
+      const step = parseBlock(text.slice(a + 8, b)); text = text.slice(b + 7);
+      if (!step.svg || count >= maxSteps) continue;
+      if (kidsLimits) { step.legend = step.legend.slice(0, 8); step.formulas = step.formulas.slice(0, 3); delete step.title; }
+      start(); res.write(JSON.stringify(step) + "\n"); count++;
+    }
+  };
+  for (let attempt = 0; attempt < 2 && !wrote && !none; attempt++) {
+    text = "";
+    try { await streamClaude(SYSTEM_BOARD_STREAM, user, 8000, BOARD_MODEL, t => { text += t; flush(); }); flush(); lastErr = null; }
+    catch (e) { lastErr = e; console.error("drawing attempt", attempt + 1, "failed:", e.message); }
+    if (wrote || none) break;
+  }
+  if (wrote) { res.write(JSON.stringify({ done: true }) + "\n"); return res.end(); }
+  if (none || !lastErr) {
+    res.setHeader("Cache-Control", isGet && none ? "public, s-maxage=2592000" : "no-store");
+    return res.status(200).json({ steps: [], done: true });
+  }
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(500).json({ error: "oops", reason: errorCode(lastErr) });
 }
 
 async function withRetry(fn, budgetMs) {
@@ -217,17 +306,7 @@ module.exports = async (req, res) => {
     user = `${DEPTH[depth]}\n\nThe learner tapped "Go deeper" on: ${context}\nHere is what was ALREADY covered:\n${prev}\n\nGo one level deeper on this same topic: new mechanisms, history, numbers, or implications. Do not repeat what was already said. Title it like "Deeper: ...".`;
   }
 
-  if (part === "board") {
-    try {
-      const b = await withRetry(() => callTool(SYSTEM_BOARD, BOARD_TOOL, user, 10000, j => Array.isArray(j.figures), BOARD_MODEL), 40000);
-      const figures = b.figures.slice(0, 4).map(f => ({ title: String(f.title || ""), caption: String(f.caption || ""), svg: cleanSvg(f.svg),
-        legend: (Array.isArray(f.legend) ? f.legend : []).slice(0, 10).map(l => ({ symbol: String(l && l.symbol || "").slice(0, 20), meaning: String(l && l.meaning || "").slice(0, 160) })).filter(l => l.symbol && l.meaning),
-        formulas: (Array.isArray(f.formulas) ? f.formulas : []).slice(0, 4).map(x => ({ formula: String(x && x.formula || "").slice(0, 80), explanation: String(x && x.explanation || "").slice(0, 400) })).filter(x => x.formula && x.explanation) }));
-      return send(200, { figures }, true);
-    } catch (e) {
-      return send(500, { error: "oops", reason: errorCode(e) });
-    }
-  }
+  if (part === "board") return streamBoard(res, isGet, user, 4, false);
 
   let lec;
   try {
