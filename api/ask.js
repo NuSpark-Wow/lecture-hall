@@ -61,7 +61,8 @@ const SYSTEM_BOARD = `You are the chalkboard artist for a college professor. Giv
 
 If the question is not a legitimate educational question (chit-chat, harmful instructions, sexual content), return figures: [].
 
-Each figure has a "title" (e.g. "Fig. 1: The water cycle"), a short "caption" (under 14 words), and an "svg".
+Each figure has a "title" (e.g. "Fig. 1: The water cycle"), a short "caption" (under 14 words), an "svg", and a "legend".
+LEGEND: list EVERY symbol, variable, Greek letter, math sign, and unit abbreviation that appears in that figure's svg (for example c, v, t, Δ, ≈, ×, ns, km/s, %, CO2), each with a plain-English meaning, and its value if it is a constant (for example "speed of light, about 300,000 km per second"). Use [] only if the figure has no symbols or abbreviations.
 Each svg is SVG ELEMENTS ONLY (no <svg> wrapper) on an 800 wide x 500 tall dark green chalkboard:
 - Use single quotes for attribute values.
 - Allowed elements: g, path, line, circle, ellipse, rect, polyline, polygon, text. Nothing else.
@@ -88,7 +89,7 @@ const LECTURE_TOOL = {
 const BOARD_TOOL = {
   name: "give_board", description: "Deliver the chalkboard figures.",
   input_schema: { type: "object", properties: {
-    figures: { type: "array", items: { type: "object", properties: { title: { type: "string" }, caption: { type: "string" }, svg: { type: "string" } } } }
+    figures: { type: "array", items: { type: "object", properties: { title: { type: "string" }, caption: { type: "string" }, svg: { type: "string" }, legend: { type: "array", items: { type: "object", properties: { symbol: { type: "string" }, meaning: { type: "string" } } } } } } }
   }, required: ["figures"] }
 };
 const OUTLINE_TOOL = {
@@ -216,7 +217,8 @@ module.exports = async (req, res) => {
   if (part === "board") {
     try {
       const b = await withRetry(() => callTool(SYSTEM_BOARD, BOARD_TOOL, user, 10000, j => Array.isArray(j.figures)), 40000);
-      const figures = b.figures.slice(0, 4).map(f => ({ title: String(f.title || ""), caption: String(f.caption || ""), svg: cleanSvg(f.svg) }));
+      const figures = b.figures.slice(0, 4).map(f => ({ title: String(f.title || ""), caption: String(f.caption || ""), svg: cleanSvg(f.svg),
+        legend: (Array.isArray(f.legend) ? f.legend : []).slice(0, 10).map(l => ({ symbol: String(l && l.symbol || "").slice(0, 20), meaning: String(l && l.meaning || "").slice(0, 160) })).filter(l => l.symbol && l.meaning) }));
       return send(200, { figures }, true);
     } catch (e) {
       return send(500, { error: "oops", reason: errorCode(e) });
