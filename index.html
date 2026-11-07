@@ -166,7 +166,7 @@ button{font-family:inherit;cursor:pointer}
   <div class="ask">
     <button class="mic" id="mic" aria-label="Ask with your voice">🎤</button>
     <div class="field">
-      <input id="q" maxlength="300" placeholder="Tap the mic and ask, or type your question…" autocomplete="off">
+      <input id="q" maxlength="300" placeholder="Ask anything…" autocomplete="off">
       <div class="hint" id="hint">Ask anything you've ever wondered about.</div>
     </div>
     <button class="go" id="go">Ask</button>
@@ -293,8 +293,10 @@ function startListening(){
   try { stopVoice(); rec.start(); listening = true; $("mic").classList.add("listening"); $("mic").textContent = "👂"; $("hint").textContent = "Listening… ask your question."; } catch(e) {}
 }
 if (!SR) {
-  $("mic").classList.add("hide");
-  $("hint").textContent = "Type your question. (Speaking works in Chrome, Edge, and Safari.)";
+  // This browser can't turn speech into text, so open the keyboard: every phone keyboard has its own 🎤
+  const kb = "Tap the red mic, then the 🎤 on your keyboard to speak. Or just type.";
+  $("hint").textContent = kb;
+  $("mic").onclick = () => { unlock(); $("q").focus(); $("hint").textContent = kb; };
 } else {
   rec = new SR(); rec.lang = "en-US"; rec.interimResults = true; rec.continuous = false;
   rec.onresult = e => { let s = ""; for (const r of e.results) s += r[0].transcript; $("q").value = s; };
