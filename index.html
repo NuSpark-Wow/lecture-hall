@@ -467,7 +467,7 @@ function addFig(f){
   figs.push(f);
   const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
   g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
-  g._legend = Array.isArray(f.legend) ? f.legend : []; g._formulas = Array.isArray(f.formulas) ? f.formulas : [];
+  g._legend = realItems(f.legend, "symbol", "meaning"); g._formulas = realItems(f.formulas, "formula", "explanation");
   g.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
   $("svg").appendChild(g); groups.push(g);
   $("thinking").classList.remove("on");
@@ -687,7 +687,7 @@ window.addEventListener("beforeprint", () => {
     const cap = document.createElement("figcaption"); cap.textContent = [f.title, f.caption].filter(Boolean).join(": ");
     fig.appendChild(svg); fig.appendChild(cap);
     if (Array.isArray(f.legend) && f.legend.length) { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = "Symbols: " + f.legend.map(l => l.symbol + " = " + l.meaning).join("  ·  "); fig.appendChild(lg); }
-    (Array.isArray(f.formulas) ? f.formulas : []).forEach(x => { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = x.formula + ": " + x.explanation; fig.appendChild(lg); });
+    (realItems(f.formulas, "formula", "explanation")).forEach(x => { const lg = document.createElement("div"); lg.className = "plegend"; lg.textContent = x.formula + ": " + x.explanation; fig.appendChild(lg); });
     box.appendChild(fig);
   });
 });
@@ -701,6 +701,9 @@ $("down").onclick = () => vote("down");
 
 /* ---------- chalkboard: safe SVG, one figure at a time ---------- */
 const OK_TAGS = new Set(["g","path","line","circle","ellipse","rect","polyline","polygon","text","tspan"]);
+// Drops filler legend rows like "none = none" that the AI sometimes adds
+const EMPTY_ITEM = /^\s*(none|n\/a|na|null|-+|—)?\s*\.?\s*$/i;
+function realItems(list, k1, k2){ return Array.isArray(list) ? list.filter(x => x && !EMPTY_ITEM.test(String(x[k1] || "")) && !EMPTY_ITEM.test(String(x[k2] || ""))) : []; }
 function sanitize(markup){
   const doc = new DOMParser().parseFromString(`<svg xmlns="${NS}">${markup}</svg>`, "image/svg+xml");
   let root = doc.documentElement;
@@ -731,8 +734,8 @@ function buildBoard(list){
   list.forEach(f => {
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
-    g._legend = Array.isArray(f.legend) ? f.legend : [];
-    g._formulas = Array.isArray(f.formulas) ? f.formulas : [];
+    g._legend = realItems(f.legend, "symbol", "meaning");
+    g._formulas = realItems(f.formulas, "formula", "explanation");
     svg.appendChild(g); groups.push(g);
   });
   svg.querySelectorAll("text").forEach(el => el.addEventListener("click", () => { if (!speaking) sayShort(el.textContent); }));
