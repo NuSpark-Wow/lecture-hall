@@ -256,6 +256,7 @@ let lesson = null, busy = false, followUp = "", reqId = 0, lastQuestion = "", fi
 let narrStarted = false, narrTimer = 0, pStarts = [], lastCi = -1, pendingMore = null, audioP = null, silentMode = false;
 let groups = [], shown = 0, manual = false, lastProgress = 0, boardStart = 0, boardOff = false, lastReveal = 0, pumpTimer = 0, liveBoard = false, boardDone = true;
 let words = [], speech = "";
+let shortNode = null, shortId = 0;
 let ctx = null, srcNode = null, lastAudio = null, raf = 0, voiceOff = false, speaking = false;
 let depth = "full", course = null;
 function track(name, data){ try { window.va("event", { name, data }); } catch(e) {} }
@@ -807,6 +808,8 @@ function setSpeaking(on){ speaking = on; $("read").classList.toggle("speaking", 
 function finish(){ setSpeaking(false); words.forEach(w => { w.el.classList.remove("on"); w.el.classList.add("done"); }); onProgress(1); }
 function stopVoice(){
   cancelAnimationFrame(raf);
+  try { if (shortNode) shortNode.stop(); } catch(e) {}
+  shortNode = null; shortId++;
   try { if (srcNode) { srcNode.onended = null; srcNode.stop(); } } catch(e) {}
   srcNode = null;
   try { speechSynthesis.cancel(); } catch(e) {}
@@ -824,9 +827,9 @@ async function speak(){
 async function prepareAudio(){
   if (!speech) return null;
   lastAudio = null; lastProgress = 0;
-  if (!voiceOff && voicePref === "man") {
+  if (!voiceOff && ctx) {
     try {
-      const r = await fetch("/api/speak", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ text: speech }) });
+      const r = await fetch("/api/speak", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ text: speech, voice: voicePref }) });
       if (r.status === 501) voiceOff = true;
       else if (r.ok) {
         const d = await r.json();
@@ -880,7 +883,30 @@ function browserVoice(text){
   });
   setTimeout(() => { if (!speaking) onProgress(1); }, 2500);
 }
-function sayShort(text){
+// Short lines use the same ElevenLabs voice, so phones match desktop
+async function sayShort(text){
+  if (!text) return;
+  const id = ++shortId;
+  try { if (shortNode) shortNode.stop(); } catch(e) {}
+  try { speechSynthesis.cancel(); } catch(e) {}
+  if (!voiceOff && ctx) {
+    try {
+      const r = await fetch("/api/speak", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ text, voice: voicePref }) });
+      if (r.status === 501) voiceOff = true;
+      else if (r.ok) {
+        const d = await r.json();
+        const bytes = Uint8Array.from(atob(d.audio), c => c.charCodeAt(0));
+        const buf = await ctx.decodeAudioData(bytes.buffer);
+        if (id !== shortId || speaking) return;
+        shortNode = ctx.createBufferSource(); shortNode.buffer = buf; shortNode.connect(ctx.destination); shortNode.start();
+        return;
+      }
+    } catch(e) {}
+  }
+  if (id !== shortId) return;
+  browserShort(text);
+}
+function browserShort(text){
   if (!("speechSynthesis" in window) || !text) return;
   const u = new SpeechSynthesisUtterance(text); const v = pickVoice(); if (v) u.voice = v; u.rate = 0.98;
   speechSynthesis.cancel(); speechSynthesis.speak(u);
