@@ -304,6 +304,26 @@ $("vMan").onclick = () => { setVoicePref("man"); unlock(); sayShort("Welcome to 
 $("vWoman").onclick = () => { setVoicePref("woman"); unlock(); sayShort("Welcome to the Lecture Hall."); };
 
 // Picks a different voice than the kids' site: the second-best match when the device has more than one.
+
+// If the phone has no male voice, the Man button lowers the pitch so it still sounds male
+const MALE_RE = /\bmale\b|christopher|roger|eric|guy|davis|tom|daniel|ryan|thomas|brian|andrew|aaron|alex|david|mark|fred|arthur|oliver/i, FEMALE_RE = /female|michelle|jenny|samantha|allison|ava|aria|emma|sonia|libby|susan|serena|kate|zira|joanna|google us english|google uk english female/i;
+function pitchFor(v, base){
+  if (voicePref !== "man") return base;
+  return v && MALE_RE.test(v.name) && !FEMALE_RE.test(v.name) ? base : 0.62;
+}
+// Some phone voices never report which word they are on; then estimate it from the clock so the board keeps up
+let estTimer = 0, estStart = 0, lastBoundary = 0;
+function startEstimate(total, rate){
+  clearInterval(estTimer); estStart = Date.now(); lastBoundary = 0;
+  const cps = 14.5 * rate;
+  estTimer = setInterval(() => {
+    if (!speaking) return;
+    if (lastBoundary && Date.now() - lastBoundary < 1500) return;
+    const ci = Math.min(total - 1, Math.floor((Date.now() - estStart) / 1000 * cps));
+    highlight(ci); onProgress(ci / total);
+  }, 300);
+}
+function stopEstimate(){ clearInterval(estTimer); estTimer = 0; }
 function pickVoice(){
   const vs = speechSynthesis.getVoices().filter(v => /^en(-|_)(US|GB)/i.test(v.lang));
   const male = /\bmale\b|christopher|roger|eric|guy|davis|tom|daniel|ryan|thomas|brian|andrew|aaron|alex|david|mark|fred|arthur|oliver/i;
@@ -850,9 +870,9 @@ function highlight(ci){
 }
 function clearHighlight(){ words.forEach(w => w.el.classList.remove("on","done")); $("read").classList.remove("speaking"); }
 function setSpeaking(on){ speaking = on; $("read").classList.toggle("speaking", on); $("stop").classList.toggle("hide", !on); $("again").classList.toggle("hide", on); if (!on) $("again").textContent = "🔊 Hear it again"; }
-function finish(){ setSpeaking(false); words.forEach(w => { w.el.classList.remove("on"); w.el.classList.add("done"); }); onProgress(1); }
+function finish(){ stopEstimate(); setSpeaking(false); words.forEach(w => { w.el.classList.remove("on"); w.el.classList.add("done"); }); onProgress(1); }
 function stopVoice(){
-  cancelAnimationFrame(raf);
+  cancelAnimationFrame(raf); stopEstimate();
   try { if (shortNode) shortNode.stop(); } catch(e) {}
   shortNode = null; shortId++;
   try { if (srcNode) { srcNode.onended = null; srcNode.stop(); } } catch(e) {}
@@ -920,9 +940,9 @@ function browserVoice(text){
   const v = pickVoice(); let started = false;
   chunks.forEach((c, idx) => {
     const u = new SpeechSynthesisUtterance(c.text);
-    if (v) u.voice = v; u.rate = 0.98; u.pitch = 1.0;
-    u.onstart = () => { if (!started) { started = true; setSpeaking(true); onProgress(0); } };
-    u.onboundary = e => { const ci = c.start + e.charIndex; highlight(ci); onProgress(ci / text.length); };
+    if (v) u.voice = v; u.rate = 0.98; u.pitch = pitchFor(v, 1.0);
+    u.onstart = () => { if (!started) { started = true; setSpeaking(true); onProgress(0); startEstimate(text.length, u.rate); } else if (!lastBoundary || Date.now() - lastBoundary > 1500) { estStart = Date.now() - c.start / (14.5 * u.rate) * 1000; } };
+    u.onboundary = e => { lastBoundary = Date.now(); const ci = c.start + e.charIndex; highlight(ci); onProgress(ci / text.length); };
     if (idx === chunks.length - 1) u.onend = finish;
     speechSynthesis.speak(u);
   });
@@ -953,7 +973,7 @@ async function sayShort(text){
 }
 function browserShort(text){
   if (!("speechSynthesis" in window) || !text) return;
-  const u = new SpeechSynthesisUtterance(text); const v = pickVoice(); if (v) u.voice = v; u.rate = 0.98;
+  const u = new SpeechSynthesisUtterance(text); const v = pickVoice(); if (v) u.voice = v; u.rate = 0.98; u.pitch = pitchFor(v, 1.0);
   speechSynthesis.cancel(); speechSynthesis.speak(u);
 }
 if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => {};

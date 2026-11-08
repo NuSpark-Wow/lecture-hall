@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
         try {
           const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${out[who + "_voice_id"]}?output_format=mp3_22050_32`, {
             method: "POST", headers: { "xi-api-key": key, "content-type": "application/json" },
-            body: JSON.stringify({ text: "Hi.", model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2" })
+            body: JSON.stringify({ text: "Hi.", model_id: process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5" })
           });
           out[who] = r.ok ? "working" : `error ${r.status}: ${(await r.text()).slice(0, 200)}`;
         } catch (e) { out[who] = "error: " + e.message; }
@@ -43,7 +43,7 @@ module.exports = async (req, res) => {
       headers: { "xi-api-key": key, "content-type": "application/json" },
       body: JSON.stringify({
         text,
-        model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
+        model_id: process.env.ELEVENLABS_MODEL || "eleven_flash_v2_5",
         voice_settings: { stability: 0.6, similarity_boost: 0.8, style: 0.15 }
       })
     });
