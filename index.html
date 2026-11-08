@@ -703,7 +703,12 @@ $("down").onclick = () => vote("down");
 const OK_TAGS = new Set(["g","path","line","circle","ellipse","rect","polyline","polygon","text","tspan"]);
 function sanitize(markup){
   const doc = new DOMParser().parseFromString(`<svg xmlns="${NS}">${markup}</svg>`, "image/svg+xml");
-  if (doc.querySelector("parsererror")) return null;
+  let root = doc.documentElement;
+  // The AI sometimes leaves a tag unclosed; the forgiving HTML reader closes it instead of dropping the whole drawing
+  if (doc.querySelector("parsererror")) {
+    root = new DOMParser().parseFromString(`<svg xmlns="${NS}">${markup}</svg>`, "text/html").querySelector("svg");
+    if (!root) return null;
+  }
   const out = document.createElementNS(NS, "g");
   const copy = (src, dst) => {
     for (const n of src.childNodes) {
@@ -718,7 +723,7 @@ function sanitize(markup){
       copy(n, el); dst.appendChild(el);
     }
   };
-  copy(doc.documentElement, out);
+  copy(root, out);
   return out;
 }
 function buildBoard(list){
