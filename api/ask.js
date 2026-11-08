@@ -280,6 +280,9 @@ module.exports = async (req, res) => {
   const prev = isGet ? "" : String(src.prev || "").slice(0, 3000);
   // the figures request carries the lecture, one section per line, so each figure matches a section
   const paras = String(src.a || "").split("\n").map(x => x.trim()).filter(Boolean).slice(0, 5).map(x => x.slice(0, 900));
+  // optional picture (POST only): explained, never saved
+  const image = isGet ? "" : String(src.image || "");
+  if (image && (image.length > 4000000 || !/^[A-Za-z0-9+/=]+$/.test(image.slice(0, 200)))) return send(400, { error: "bad_image" });
   if (!question) return send(400, { error: "empty" });
 
   if (HELP_WORDS.test(question)) {
@@ -320,9 +323,13 @@ module.exports = async (req, res) => {
   }
 
   let lec;
+  const content = image ? [
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: image } },
+    { type: "text", text: user + `\n\nThe learner attached the image above. Identify what it shows and lecture on it (or answer their question about it). Open by describing what is in the image. If it is a chart, document, or diagram, explain what it says and why it matters.` }
+  ] : user;
   try {
     lec = await withRetry(async () => {
-      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, user, 4000, x => Array.isArray(x.answer)));
+      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, content, 4000, x => Array.isArray(x.answer)));
       if (!j) throw new Error("bad_shape");
       return j;
     }, 30000);
