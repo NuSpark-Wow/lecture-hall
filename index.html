@@ -907,10 +907,21 @@ async function prepareAudio(){
   }
   return null;
 }
+// Evens out loudness so both voices play at the same strong level (a quiet clip gets turned up; a limiter stops distortion)
+function leveled(buf){
+  let sum = 0, n = 0; const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i += 16) { sum += d[i] * d[i]; n++; }
+  const rms = Math.sqrt(sum / Math.max(1, n)) || 0.05;
+  const g = ctx.createGain(); g.gain.value = Math.min(4, Math.max(0.6, 0.16 / rms));
+  const lim = ctx.createDynamicsCompressor();
+  lim.threshold.value = -6; lim.knee.value = 4; lim.ratio.value = 12; lim.attack.value = 0.003; lim.release.value = 0.15;
+  g.connect(lim); lim.connect(ctx.destination);
+  return g;
+}
 function playBuffer(a){
   stopVoice();
   if (!ctx) return browserVoice(speech);
-  srcNode = ctx.createBufferSource(); srcNode.buffer = a.buf; srcNode.connect(ctx.destination);
+  srcNode = ctx.createBufferSource(); srcNode.buffer = a.buf; srcNode.connect(leveled(a.buf));
   const t0 = ctx.currentTime, dur = a.buf.duration;
   setSpeaking(true);
   srcNode.onended = () => { cancelAnimationFrame(raf); finish(); };
@@ -961,7 +972,7 @@ async function sayShort(text){
         const bytes = Uint8Array.from(atob(d.audio), c => c.charCodeAt(0));
         const buf = await ctx.decodeAudioData(bytes.buffer);
         if (id !== shortId || speaking) return;
-        shortNode = ctx.createBufferSource(); shortNode.buffer = buf; shortNode.connect(ctx.destination); shortNode.start();
+        shortNode = ctx.createBufferSource(); shortNode.buffer = buf; shortNode.connect(leveled(buf)); shortNode.start();
         return;
       }
     } catch(e) {}
