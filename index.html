@@ -178,6 +178,7 @@ button{font-family:inherit;cursor:pointer}
       <div class="toggle" role="group" aria-label="Choose a voice">
         <button id="vMan" class="on">🔊 Man</button>
         <button id="vWoman">🔊 Woman</button>
+        <button id="vMute" aria-label="Mute: no voice, read the words">🔇 Mute</button>
       </div>
     </div>
   </div>
@@ -294,14 +295,16 @@ function unlock(){
 
 /* ---------- voice choice ---------- */
 let voicePref = "man";
-try { if (localStorage.getItem("lh_voice") === "woman") voicePref = "woman"; } catch(e) {}
+try { const v = localStorage.getItem("lh_voice"); if (v === "woman" || v === "mute") voicePref = v; } catch(e) {}
 function setVoicePref(p){
   voicePref = p;
-  $("vMan").classList.toggle("on", p === "man"); $("vWoman").classList.toggle("on", p === "woman");
+  $("vMan").classList.toggle("on", p === "man"); $("vWoman").classList.toggle("on", p === "woman"); $("vMute").classList.toggle("on", p === "mute");
   try { localStorage.setItem("lh_voice", p); } catch(e) {}
 }
 $("vMan").onclick = () => { setVoicePref("man"); unlock(); sayShort("Welcome to the Lecture Hall."); };
 $("vWoman").onclick = () => { setVoicePref("woman"); unlock(); sayShort("Welcome to the Lecture Hall."); };
+// Mute: no voice at all; the words and pictures still appear in full.
+$("vMute").onclick = () => { const was = speaking; setVoicePref("mute"); try { if (typeof shortNode !== "undefined" && shortNode) shortNode.stop(); } catch(e) {} try { speechSynthesis.cancel(); } catch(e) {} if (was) { stopVoice(); finish(); } };
 
 // Picks a different voice than the kids' site: the second-best match when the device has more than one.
 
@@ -888,6 +891,7 @@ async function speak(){
 }
 // Gets the recorded-voice audio (or null, meaning use the browser's voice)
 async function prepareAudio(){
+  if (voicePref === "mute") return null;
   if (!speech) return null;
   lastAudio = null; lastProgress = 0;
   if (!voiceOff && ctx) {
@@ -919,6 +923,7 @@ function leveled(buf){
   return g;
 }
 function playBuffer(a){
+  if (voicePref === "mute") { finish(); return; }
   stopVoice();
   if (!ctx) return browserVoice(speech);
   srcNode = ctx.createBufferSource(); srcNode.buffer = a.buf; srcNode.connect(leveled(a.buf));
@@ -937,6 +942,7 @@ function playBuffer(a){
 }
 // Long lectures are spoken in chunks so browsers don't cut off midway.
 function browserVoice(text){
+  if (voicePref === "mute") { finish(); return; }
   if (!("speechSynthesis" in window)) { onProgress(1); return; }
   stopVoice();
   const chunks = []; const re = /[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g; let m, buf = "", bufStart = 0;
@@ -959,6 +965,7 @@ function browserVoice(text){
 }
 // Short lines use the same ElevenLabs voice, so phones match desktop
 async function sayShort(text){
+  if (voicePref === "mute") return;
   if (!text) return;
   const id = ++shortId;
   try { if (shortNode) shortNode.stop(); } catch(e) {}
@@ -981,6 +988,7 @@ async function sayShort(text){
   browserShort(text);
 }
 function browserShort(text){
+  if (voicePref === "mute") return;
   if (!("speechSynthesis" in window) || !text) return;
   const u = new SpeechSynthesisUtterance(text); const v = pickVoice(); if (v) u.voice = v; u.rate = 0.98; u.pitch = pitchFor(v, 1.0);
   speechSynthesis.cancel(); speechSynthesis.speak(u);
