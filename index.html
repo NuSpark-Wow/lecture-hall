@@ -138,6 +138,24 @@ button{font-family:inherit;cursor:pointer}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:12px 18px;border-radius:10px;font-weight:600;font-size:14px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
 .toast.on{opacity:1}
 .print-figs{display:none}
+/* Study bar under the chalkboard: Pause, Continue, Explain this picture */
+.studybar{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 4px 2px}
+.studybar button{min-height:50px;border-radius:12px;border:2px solid rgba(255,255,255,.35);background:rgba(255,255,255,.08);color:#f5f3ea;font-weight:700;font-size:16px;line-height:1.15;padding:6px 8px}
+.studybar button:disabled{opacity:.38}
+.studybar button.on:disabled{opacity:1}
+.studybar button small{display:block;font-size:12px;font-weight:600;margin-top:2px}
+.studybar button.on{background:#ffe08a;border-color:#ffe08a;color:#2a2a1e}
+.studybar #bCont.ready{animation:readyGlow 1.6s ease-in-out infinite;border-color:#a3e635;color:#a3e635;opacity:1}
+.studybar #bCont.ready.on{color:#2a2a1e}
+@media (max-width:560px){.studybar button{font-size:14px;min-height:54px}}
+.explain{margin:8px 4px 2px;padding:12px 14px;border-top:1px dashed rgba(255,255,255,.3);color:#f5f3ea;font-size:15.5px;line-height:1.5}
+.explain .lt{font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#d9c9a8;font-weight:700;margin:4px 0 6px}
+.explain .ov{margin:0 0 10px;font-style:italic}
+.explain .it{margin:0 0 10px}
+.explain .it b{font-family:Kalam,cursive;font-size:20px;color:#ffe08a;margin-right:6px}
+.explain .why{display:block;color:#a8e6a3;margin-top:2px}
+.explain .wait{color:#d9c9a8;font-style:italic}
+.explain .hidebtn{border:1px solid rgba(255,255,255,.35);background:none;color:#f5f3ea;border-radius:10px;padding:8px 14px;font-weight:700;font-size:14px;margin-top:4px}
 .legend{margin:8px 4px 2px;padding:10px 12px;border-top:1px dashed rgba(255,255,255,.3);display:flex;flex-wrap:wrap;gap:6px 18px;color:#f5f3ea;font-size:14.5px;line-height:1.4}
 .legend .lt{width:100%;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:#d9c9a8;font-weight:700}
 .legend b{font-family:Kalam,cursive;font-size:19px;color:#ffe08a;font-weight:700;margin-right:4px}
@@ -220,7 +238,13 @@ button{font-family:inherit;cursor:pointer}
         <button id="replay" aria-label="Redraw figure" disabled>⟲</button>
       </div>
     </div>
+    <div class="studybar" id="studybar">
+      <button id="bPause" disabled>⏸ Pause</button>
+      <button id="bCont" disabled>▶ Continue</button>
+      <button id="bExplain" disabled>📖 Explain this picture</button>
+    </div>
     <div class="legend hide" id="legend"></div>
+    <div class="explain hide" id="explain" aria-live="polite"></div>
   </div>
   <div class="print-figs" id="printFigs"></div>
 
@@ -362,6 +386,7 @@ function startEstimate(total, rate){
   const cps = 14.5 * rate;
   estTimer = setInterval(() => {
     if (!speaking) return;
+    if (typeof paused !== "undefined" && paused) { estStart += 300; return; }   // paused: the read-along waits too
     if (lastBoundary && Date.now() - lastBoundary < 1500) return;
     const ci = Math.min(total - 1, Math.floor((Date.now() - estStart) / 1000 * cps));
     highlight(ci); onProgress(ci / total);
@@ -797,7 +822,7 @@ function sanitize(markup){
   return out;
 }
 function buildBoard(list){
-  const svg = $("svg"); svg.innerHTML = ""; groups = []; shown = 0; manual = false; boardStart = 0; liveBoard = false; boardDone = true; renderLegend([]);
+  const svg = $("svg"); svg.innerHTML = ""; groups = []; if (typeof explainFor !== "undefined") { explainFor = null; $("explain").classList.add("hide"); $("bExplain").textContent = "📖 Explain this picture"; } shown = 0; manual = false; boardStart = 0; liveBoard = false; boardDone = true; renderLegend([]);
   list.forEach(f => {
     const g = sanitize(f.svg || "") || document.createElementNS(NS, "g");
     g.style.display = "none"; g.dataset.title = f.title || ""; g.dataset.caption = f.caption || "";
@@ -870,6 +895,7 @@ function showFigure(i){
   if (i < 0 || i >= groups.length) return;
   drawGroup(groups[i]); tidyText(groups[i]); shown = i + 1;
   setCaption(i);
+  if (explainFor && explainFor !== groups[i]) { $("explain").classList.add("hide"); explainFor = null; $("bExplain").textContent = "📖 Explain this picture"; }
   updateCtrls();
 }
 // "(1 of 3)" only once we know how many figures there are
@@ -897,7 +923,7 @@ function renderLegend(list, formulas){
   }
   box.classList.remove("hide");
 }
-function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0; }
+function updateCtrls(){ $("prev").disabled = shown <= 1; $("next").disabled = shown >= groups.length; $("replay").disabled = shown === 0; if (typeof studyUI === "function") studyUI(); }
 $("next").onclick = () => { manual = true; flipStopped = true; revealNext(); };
 $("prev").onclick = () => { manual = true; flipStopped = true; if (shown > 1) showFigure(shown - 2); };
 $("replay").onclick = () => { manual = true; flipStopped = true; if (shown > 0) showFigure(shown - 1); };
@@ -937,16 +963,85 @@ var readyWhilePaused = false;
 function pauseLabel(){ const b = $("pause"); if (!b) return; if (!paused) readyWhilePaused = false;
   const c = "▶ Continue";
   b.textContent = paused ? (readyWhilePaused ? c + " · diagram ready" : c) : "⏸ Pause";
-  b.classList.toggle("hide", !speaking); b.classList.toggle("on", paused); b.classList.toggle("ready", paused && readyWhilePaused); }
-function unpause(){ if (!paused) return; paused = false; try { if (ctx) ctx.resume(); } catch(e) {} try { speechSynthesis.resume(); } catch(e) {} pauseLabel(); }
-$("pause").onclick = () => {
-  if (!speaking) return;
-  if (paused) { unpause(); return; }
+  b.classList.toggle("hide", !speaking); b.classList.toggle("on", paused); b.classList.toggle("ready", paused && readyWhilePaused); studyUI(); }
+function unpause(){ if (typeof boardHeld !== "undefined") boardHeld = false; if (!paused) return; paused = false; try { if (ctx) ctx.resume(); } catch(e) {} try { speechSynthesis.resume(); } catch(e) {} pauseLabel(); }
+function pauseVoice(){
+  if (!speaking || paused) return;
   paused = true;
   try { if (ctx) ctx.suspend(); } catch(e) {}
   try { speechSynthesis.pause(); } catch(e) {}
   pauseLabel();
+}
+$("pause").onclick = () => { if (!speaking) return; if (paused) unpause(); else pauseVoice(); };
+
+/* ---------- study bar under the chalkboard ---------- */
+// Pause stops the voice AND the pictures, so you can study the board; Continue picks both up where they were.
+var boardHeld = false;   // the figures are frozen (also when the talking is over and they are flipping on their own)
+function studyUI(){
+  const bp = $("bPause"), bc = $("bCont"), be = $("bExplain"); if (!bp) return;
+  const flipping = !speaking && groups.length > 0 && shown < groups.length && !manual;
+  bp.disabled = !((speaking && !paused) || (flipping && !boardHeld));
+  bc.disabled = !(paused || boardHeld);
+  bp.classList.toggle("on", paused || boardHeld);
+  bc.classList.toggle("ready", (paused || boardHeld) && readyWhilePaused);
+  bc.textContent = "▶ Continue";
+  if ((paused || boardHeld) && readyWhilePaused) { const sm = document.createElement("small"); sm.textContent = "next figure ready"; bc.appendChild(sm); }
+  be.disabled = shown === 0;
+}
+$("bPause").onclick = () => {
+  unlock();
+  if (speaking) pauseVoice();
+  boardHeld = true; flipStopped = true; clearTimeout(pumpTimer);
+  studyUI();
 };
+$("bCont").onclick = () => {
+  unlock();
+  const wasHeld = boardHeld; boardHeld = false;
+  if (paused) unpause();
+  else if (wasHeld && !speaking) { if (silentMode) pump(); else autoFlip(); }   // talking is over: the figures carry on flipping
+  readyWhilePaused = false; studyUI();
+};
+// Explain this picture: a little more about every word and symbol on the current figure, and why it matters
+var explainFor = null;
+$("bExplain").onclick = async () => {
+  const g = groups[shown - 1]; if (!g) return;
+  const box = $("explain");
+  if (explainFor === g && !box.classList.contains("hide")) { box.classList.add("hide"); explainFor = null; $("bExplain").textContent = "📖 Explain this picture"; return; }
+  unlock();
+  if (speaking && !paused) { pauseVoice(); boardHeld = true; flipStopped = true; clearTimeout(pumpTimer); studyUI(); }   // studying the picture: everything waits
+  explainFor = g; $("bExplain").textContent = "📖 Hide explanation";
+  box.classList.remove("hide");
+  if (g._explain) { renderExplain(g._explain); return; }
+  box.innerHTML = '<div class="wait">Explaining this figure… this takes a few seconds the first time.</div>';
+  const seen = new Set(), words = [];
+  const add = w => { w = String(w || "").replace(/\s+/g, " ").trim(); if (w.length < 2 || /^[\d\s.,%:-]+$/.test(w) || /^fig(ure)?\.?\s*\d/i.test(w) || seen.has(w.toLowerCase())) return; seen.add(w.toLowerCase()); words.push(w.slice(0, 50)); };
+  (g._legend || []).forEach(l => add(l.symbol));
+  g.querySelectorAll("text").forEach(t => add(t.textContent));
+  const forms = (g._formulas || []).map(f => f.formula).slice(0, 4);
+  const qs = `part=explain&v=1&q=${encodeURIComponent(norm(lastQuestion || (lesson && lesson.title) || $("title").textContent || ""))}&t=${encodeURIComponent(g.dataset.title || "")}&c=${encodeURIComponent(g.dataset.caption || "")}&w=${encodeURIComponent(words.slice(0, 24).join("|"))}&f=${encodeURIComponent(forms.join("||"))}`;
+  let d = null;
+  for (let attempt = 0; attempt < 2 && !d; attempt++) {
+    try { const r = await fetch("/api/ask?" + qs); if (r.ok) { const j = await r.json(); if (j && Array.isArray(j.items)) d = j; } } catch(e) {}
+  }
+  if (explainFor !== g) return;   // moved to another figure while waiting
+  if (!d || (!d.items.length && !(d.formulas || []).length)) { box.innerHTML = '<div class="wait">Couldn\'t explain this one right now. Tap the button again in a moment.</div>'; return; }
+  g._explain = d; renderExplain(d);
+};
+function renderExplain(d){
+  const box = $("explain"); box.innerHTML = "";
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  box.appendChild(el("div", "lt", "About this picture"));
+  if (d.overview) box.appendChild(el("p", "ov", d.overview));
+  if (d.items.length) {
+    box.appendChild(el("div", "lt", "What each word and symbol means"));
+    d.items.forEach(i => { const p = el("p", "it"); p.appendChild(el("b", "", i.word)); p.appendChild(document.createTextNode(i.more)); if (i.why) p.appendChild(el("span", "why", "Why it matters: " + i.why)); box.appendChild(p); });
+  }
+  if ((d.formulas || []).length) {
+    box.appendChild(el("div", "lt", "Formulas, step by step"));
+    d.formulas.forEach(i => { const p = el("p", "it"); p.appendChild(el("b", "", i.formula)); p.appendChild(document.createTextNode(i.more)); if (i.why) p.appendChild(el("span", "why", "Why it matters: " + i.why)); box.appendChild(p); });
+  }
+  const h = el("button", "hidebtn", "Hide explanation"); h.onclick = () => { box.classList.add("hide"); explainFor = null; $("bExplain").textContent = "📖 Explain this picture"; }; box.appendChild(h);
+}
 
 $("again").onclick = () => { unlock(); if (lastAudio) playBuffer(lastAudio); else speak(); };
 
