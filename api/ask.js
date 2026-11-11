@@ -86,6 +86,9 @@ MAKE IT COMPELLING (this matters most). Each figure should look like the best ch
 LABELS AND LAYOUT
 - TEXT SIZE MATH: in Kalam each character is about 0.55 x font-size wide (at 26px, about 14px per character). Any box holding text must be at least (characters x 0.55 x font-size) + 30px wide. Prefer short labels (1-4 words). Never let text run past a box edge or past x 20 or x 780.
 - For a labeled illustration, place the drawing on the left 60-65% and the labels in a neat column on the right (x 540-775, text-anchor='start'), 36px or more apart, in the same top-to-bottom order as the parts they name so leader lines never cross. Each leader line runs from a small dot (r 4) ON the part to 8px short of its label. Every label has a leader line that ends on the part it names. Timelines, cycles and flowcharts can use the full width instead.
+- TEXT IN A BOX OR PILL: center it. For a box at y=Y with height H, put the text at y = Y + H/2 + 0.35 x font-size with text-anchor='middle' at the box's center x, and make the box at least font-size + 24 tall.
+- ROWS: anything stacked vertically keeps at least 20px of empty space between rows. Never put a box or pill on top of other words. Do not crowd the bottom of the board.
+- LABELS NEVER SIT ON A LINE: keep words at least 12px away from ground lines and box borders.
 - LINES NEVER CROSS TEXT, and text never sits on another shape's outline. Objects do not overlap unless one is truly inside the other. Keep everything inside x 20-780, y 20-480. Each figure stands alone (the board is cleared between figures).
 - Before you finish each figure, check: Does it fill the board? Is the main object big and recognizable? Is every label's line touching the right part? Does any text run off the board or cross a line? Fix these first.
 
