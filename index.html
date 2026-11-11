@@ -202,7 +202,7 @@ button{font-family:inherit;cursor:pointer}
         <button id="vWoman">🔊 Woman</button>
         <button id="vMute" aria-label="Mute: no voice, read the words">🔇 Mute</button>
       </div>
-      <div class="toggle" role="group" aria-label="Voice speed">
+      <div class="toggle" role="group" aria-label="Voice speed" style="display:none">
         <button id="sSlow">🐢 Slower</button>
         <button id="sNormal" class="on">▶ Normal</button>
         <button id="sFast">🐇 Faster</button>
@@ -347,7 +347,7 @@ $("vMute").onclick = () => {
   const was = speaking; setVoicePref("mute"); try { if (typeof shortNode !== "undefined" && shortNode) shortNode.stop(); } catch(e) {} try { speechSynthesis.cancel(); } catch(e) {} if (was) { stopVoice(); finish(); } };
 /* ---------- voice speed: Slower, Normal, Faster ---------- */
 let speedPref = "normal";
-try { const s = localStorage.getItem("lh_speed"); if (s === "slow" || s === "fast") speedPref = s; } catch(e) {}
+// Voice speed stays at normal (Pause and Continue let people go at their own pace)
 function setSpeed(p){
   const changed = p !== speedPref;
   if (changed) lastAudio = null;   // re-fetch the voice at the new speed
