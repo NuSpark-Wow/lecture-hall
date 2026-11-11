@@ -183,6 +183,7 @@ button{font-family:inherit;cursor:pointer}
 @keyframes readyGlow{0%,100%{box-shadow:0 0 0 0 rgba(163,230,53,0)}50%{box-shadow:0 0 0 6px rgba(163,230,53,.4)}}
 #views button.fresh{animation:readyGlow 1.2s ease-in-out 3}
 @media (prefers-reduced-motion:reduce){#pause.ready,#views button.fresh{animation:none;outline:2px solid #a3e635}}
+#startOver{color:#a8402e;font-weight:800}
 </style>
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
@@ -201,6 +202,9 @@ button{font-family:inherit;cursor:pointer}
         <button id="vMan" class="on">🔊 Man</button>
         <button id="vWoman">🔊 Woman</button>
         <button id="vMute" aria-label="Mute: no voice, read the words">🔇 Mute</button>
+      </div>
+      <div class="toggle" role="group" aria-label="Start over">
+        <button id="startOver" title="Stop and start over with a new topic">⟲ Start over</button>
       </div>
       <div class="toggle" role="group" aria-label="Voice speed" style="display:none">
         <button id="sSlow">🐢 Slower</button>
@@ -1208,6 +1212,15 @@ if (sq) { if (params.get("d") === "quick") setDepth("quick"); $("q").value = sq;
   setInterval(send, 1500);
   send();
 })();
+})();
+
+// Start over: stops everything and clears the topic, so the visitor can ask something new (or pick another tool)
+(function(){ const b = document.getElementById("startOver"); if (!b) return;
+  b.onclick = () => {
+    try { speechSynthesis.cancel(); } catch(e) {}
+    try { if (typeof ctx !== "undefined" && ctx) ctx.close(); } catch(e) {}
+    location.replace(location.pathname);   // a fresh page, without any shared-link question
+  };
 })();
 </script>
 </body>
