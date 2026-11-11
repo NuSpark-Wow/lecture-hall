@@ -184,6 +184,10 @@ button{font-family:inherit;cursor:pointer}
 #views button.fresh{animation:readyGlow 1.2s ease-in-out 3}
 @media (prefers-reduced-motion:reduce){#pause.ready,#views button.fresh{animation:none;outline:2px solid #a3e635}}
 #startOver{color:#a8402e;font-weight:800}
+.rategrp{display:flex;align-items:center;gap:6px;padding:4px 12px!important}
+.rategrp input{width:130px;accent-color:#c8962c;height:28px}
+.rategrp .rl{font-size:18px}
+.rategrp #rateVal{min-width:92px;font-size:13px!important;padding:6px 8px!important}
 </style>
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
@@ -211,6 +215,7 @@ button{font-family:inherit;cursor:pointer}
         <button id="sNormal" class="on">▶ Normal</button>
         <button id="sFast">🐇 Faster</button>
       </div>
+      <div class="toggle rategrp" role="group" aria-label="Voice speed slider"><span class="rl" aria-hidden="true">🐢</span><input type="range" id="rate" min="0.8" max="1.25" step="0.05" value="1" aria-label="Voice speed: slide left for slower, right for faster"><span class="rl" aria-hidden="true">🐇</span><button id="rateVal" title="Tap to go back to normal speed">Normal</button></div>
     </div>
   </div>
 
@@ -328,6 +333,7 @@ $("dFull").onclick = () => setDepth("full");
 /* ---------- audio unlock ---------- */
 function unlock(){
   try { if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === "suspended" && !paused) ctx.resume(); } catch(e) {}
+  try { blessVoiceEl(); } catch(e) {}
   try { if ("speechSynthesis" in window) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); } } catch(e) {}
 }
 
@@ -968,11 +974,11 @@ function pauseLabel(){ const b = $("pause"); if (!b) return; if (!paused) readyW
   const c = "▶ Continue";
   b.textContent = paused ? (readyWhilePaused ? c + " · diagram ready" : c) : "⏸ Pause";
   b.classList.toggle("hide", !speaking); b.classList.toggle("on", paused); b.classList.toggle("ready", paused && readyWhilePaused); studyUI(); }
-function unpause(){ if (typeof boardHeld !== "undefined") boardHeld = false; if (!paused) return; paused = false; try { if (ctx) ctx.resume(); } catch(e) {} try { speechSynthesis.resume(); } catch(e) {} pauseLabel(); }
+function unpause(){ if (typeof boardHeld !== "undefined") boardHeld = false; if (!paused) return; paused = false; try { if (ctx) ctx.resume(); } catch(e) {} elUnhold(); try { speechSynthesis.resume(); } catch(e) {} pauseLabel(); }
 function pauseVoice(){
   if (!speaking || paused) return;
   paused = true;
-  try { if (ctx) ctx.suspend(); } catch(e) {}
+  try { if (ctx) ctx.suspend(); } catch(e) {} elHold();
   try { speechSynthesis.pause(); } catch(e) {}
   pauseLabel();
 }
@@ -1066,10 +1072,11 @@ async function prepareAudio(){
       else if (r.ok) {
         const d = await r.json();
         const bytes = Uint8Array.from(atob(d.audio), c => c.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: "audio/mpeg" }));   // for the speed-adjustable player
         const buf = await ctx.decodeAudioData(bytes.buffer);
         const times = d.alignment && d.alignment.character_start_times_seconds;
         words.forEach(w => { w.t = times && times[w.start] != null ? times[w.start] : null; });
-        lastAudio = { buf, timed: !!times };
+        lastAudio = { buf, timed: !!times, url };
         return lastAudio;
       }
     } catch(e) {}
@@ -1087,17 +1094,80 @@ function leveled(buf){
   g.connect(lim); lim.connect(ctx.destination);
   return g;
 }
+
+/* ---------- voice speed slider ---------- */
+// The recorded voice plays through an audio player, so the slider changes its speed instantly, any time,
+// while keeping a natural pitch. Loudness levelling still applies. If the player can't start, the old way is used.
+var voiceEl = null, voiceElSrc = null, rateNow = 1;
+try { const r0 = parseFloat(localStorage.getItem("lh_rate")); if (r0 >= 0.8 && r0 <= 1.25) rateNow = r0; } catch(e) {}
+var SILENT_CLIP = "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+function getVoiceEl(){
+  if (voiceEl) return voiceEl;
+  if (!ctx || !ctx.createMediaElementSource) return null;
+  try {
+    const el = new Audio(); el.setAttribute("playsinline", ""); el.preload = "auto";
+    el.preservesPitch = true; el.mozPreservesPitch = true; el.webkitPreservesPitch = true;
+    voiceElSrc = ctx.createMediaElementSource(el); voiceEl = el;
+  } catch(e) { voiceEl = null; }
+  return voiceEl;
+}
+function blessVoiceEl(){
+  const el = getVoiceEl(); if (!el || el._blessed) return; el._blessed = true;
+  try { el.src = SILENT_CLIP; const p = el.play(); if (p) p.catch(() => {}); } catch(e) {}
+}
+// Returns a stand-in for the old sound node (start, stop, onended), or null to play the old way
+function elPlay(a){
+  const el = getVoiceEl(); if (!el || !a || !a.url || !a.buf) return null;
+  let ended = null, backup = null;
+  const node = {
+    _el: true,
+    set onended(f){ ended = f; el.onended = f ? () => { if (ended) ended(); } : null; if (backup) backup.onended = el.onended; },
+    get onended(){ return ended; },
+    start(when, off){
+      try { voiceElSrc.disconnect(); } catch(e) {}
+      voiceElSrc.connect(leveled(a.buf));
+      el.pause();
+      const go = () => {
+        try { el.currentTime = off || 0; } catch(e) {}
+        el.playbackRate = rateNow;
+        const p = el.play();
+        if (p) p.catch(() => {   // the browser refused the player: play the old way instead
+          node._el = false;
+          try { backup = ctx.createBufferSource(); backup.buffer = a.buf; backup.connect(leveled(a.buf)); backup.onended = el.onended; backup.start(0, off || 0); } catch(e) {}
+        });
+      };
+      if (el.src !== a.url) { el.src = a.url; el.addEventListener("loadedmetadata", go, { once: true }); el.load(); } else go();
+    },
+    stop(){ el.onended = null; el.pause(); if (backup) { try { backup.onended = null; backup.stop(); } catch(e) {} } }
+  };
+  return node;
+}
+function elHold(){ if (voiceEl && !voiceEl.paused) { voiceEl._held = true; voiceEl.pause(); } }
+function elUnhold(){ if (voiceEl && voiceEl._held) { voiceEl._held = false; voiceEl.playbackRate = rateNow; const p = voiceEl.play(); if (p) p.catch(() => {}); } }
+(function(){
+  const r = document.getElementById("rate"), lab = document.getElementById("rateVal"); if (!r || !lab) return;
+  const show = () => { lab.textContent = Math.abs(rateNow - 1) < 0.01 ? "Normal" : (rateNow < 1 ? "Slower " : "Faster ") + rateNow.toFixed(2).replace(/0$/, "") + "×"; };
+  r.value = rateNow; show();
+  r.addEventListener("input", () => {
+    rateNow = parseFloat(r.value) || 1; if (Math.abs(rateNow - 1) < 0.03) rateNow = 1;
+    if (voiceEl) voiceEl.playbackRate = rateNow;
+    try { localStorage.setItem("lh_rate", rateNow); } catch(e) {}
+    show();
+  });
+  lab.onclick = () => { r.value = 1; r.dispatchEvent(new Event("input")); };   // tap the label to go back to normal
+})();
 function playBuffer(a, offset){   // offset: start partway in (used when the speed changes mid-lesson)
   if (voicePref === "mute") { finish(); return; }
   stopVoice();
   if (!ctx) return browserVoice(speech);
-  srcNode = ctx.createBufferSource(); srcNode.buffer = a.buf; srcNode.connect(leveled(a.buf));
+  srcNode = elPlay(a);
+  if (!srcNode) { srcNode = ctx.createBufferSource(); srcNode.buffer = a.buf; srcNode.connect(leveled(a.buf)); }
   const t0 = ctx.currentTime - (offset || 0), dur = a.buf.duration; playT0 = t0; playDur = dur;
   setSpeaking(true);
   srcNode.onended = () => { cancelAnimationFrame(raf); finish(); };
   srcNode.start(0, offset || 0);
   const tick = () => {
-    const tm = ctx.currentTime - t0;
+    const tm = srcNode && srcNode._el && voiceEl ? voiceEl.currentTime : ctx.currentTime - t0;
     if (a.timed) { let k = -1; for (let i = 0; i < words.length; i++) { if (words[i].t != null && words[i].t <= tm) k = i; } if (k >= 0) highlight(words[k].start); }
     else highlight(Math.floor(speech.length * tm / dur));
     onProgress(tm / dur);
