@@ -5,8 +5,9 @@
 
 const MODEL = process.env.CLAUDE_MODEL || "claude-sonnet-5-5";
 const CHECK_MODEL = process.env.CLAUDE_CHECK_MODEL || "claude-haiku-5-5";
-// The drawing step uses the faster model. To switch back, add BOARD_MODEL = claude-sonnet-5-5 in Vercel settings.
-const BOARD_MODEL = process.env.BOARD_MODEL || "claude-haiku-5-5";
+// The chalkboard figures use the stronger model, so they look richer and more accurate.
+// To go back to the faster model, add BOARD_MODEL = claude-haiku-5-5 in Vercel settings.
+const BOARD_MODEL = process.env.BOARD_MODEL || "claude-sonnet-5-5";
 const HOURLY_LIMIT = 30;
 const hits = new Map();
 
@@ -69,10 +70,24 @@ FORMULAS: for EVERY formula or equation written in that figure's svg (for exampl
 Each svg is SVG ELEMENTS ONLY (no <svg> wrapper) on an 800 wide x 500 tall dark green chalkboard:
 - Use single quotes for attribute values.
 - Allowed elements: g, path, line, circle, ellipse, rect, polyline, polygon, text. Nothing else.
-- Chalk colors only: #f5f3ea (white chalk), #ffe08a (yellow), #8ecbff (blue), #ffa3b1 (pink), #a8e6a3 (green), #ffc078 (orange). Mostly white and yellow. Fills, if any, use fill-opacity='0.25'.
-- Lines: stroke-width 3 to 5, stroke-linecap='round'. Text: font-family='Kalam' font-size 20 to 34, fill a chalk color.
-- Pick the right diagram type for each figure: labeled cross-section, flowchart, timeline, cycle, simple graph with labeled axes, comparison, cause-and-effect chain, or a formula worked step by step.
-- LAYOUT: plan positions first. Objects must not overlap; text never sits on a shape; leave 20px between things; keep inside x 20-780, y 20-480. Max 18 elements per figure. Each figure stands alone (the board is cleared between figures).
+- Chalk colors only: #f5f3ea (white chalk), #ffe08a (yellow), #8ecbff (blue), #ffa3b1 (pink), #a8e6a3 (green), #ffc078 (orange).
+- Lines: stroke-width 3 to 6, stroke-linecap='round', stroke-linejoin='round'. Text: font-family='Kalam', fill a chalk color.
+
+MAKE IT COMPELLING (this matters most). Each figure should look like the best chalkboard drawing a gifted professor ever made: big, bold, colorful and instantly clear from across the room.
+- FILL THE BOARD. The drawing and its labels together use most of the 800 x 500 board, edge to edge (roughly x 30-770, y 30-470). Never a small drawing in a corner or a lot of empty board. The main object is LARGE: at least 380px wide or 300px tall.
+- DRAW THE REAL THING, not boxes with words. Show what it actually looks like: a heart as a heart, a sun with rays, a cell with its organelles, a bridge with its cables, a coin, a factory, a person, a planet, an atom. Use paths and curves for natural shapes. Boxes are only for flowcharts.
+- SOLID, COLORFUL SHAPES. Give main shapes a colored chalk fill (fill-opacity='0.3') plus a bold outline in the same or a lighter chalk color. Use 3-5 colors, each with a job (for example blue = water, orange = heat, green = living things), and keep the same meaning across the figure.
+- DEPTH AND DETAIL. Add the details that make it believable: texture lines, hatching for shadow or cut surfaces, small inner parts, a ground line, motion lines. 25-50 elements per figure.
+- SHOW MOVEMENT AND CAUSE with bold arrows (stroke-width 4-5) ending in solid triangle arrowheads (a small polygon), in yellow or orange. Curved arrows for cycles.
+- CLEAR HIERARCHY. Main labels font-size 26-30 in white or yellow; smaller labels 22-24; numbers and units can be in a highlight color. Nothing smaller than 22.
+- ONE KEY TAKEAWAY. Most figures end with a short takeaway line (under 40 characters) near the bottom, inside a rounded rectangle with a yellow outline and fill-opacity='0.15' (for example "More CO2 = more trapped heat"). Skip it only if there is no room.
+- Pick the best diagram type for the section: labeled illustration or cross-section, cycle, flowchart with icons, timeline with small pictures at each date, cause-and-effect chain, a graph with labeled axes and an annotated curve, a side-by-side comparison, or a formula worked step by step with a small picture of what it measures.
+
+LABELS AND LAYOUT
+- TEXT SIZE MATH: in Kalam each character is about 0.55 x font-size wide (at 26px, about 14px per character). Any box holding text must be at least (characters x 0.55 x font-size) + 30px wide. Prefer short labels (1-4 words). Never let text run past a box edge or past x 20 or x 780.
+- For a labeled illustration, place the drawing on the left 60-65% and the labels in a neat column on the right (x 540-775, text-anchor='start'), 36px or more apart, in the same top-to-bottom order as the parts they name so leader lines never cross. Each leader line runs from a small dot (r 4) ON the part to 8px short of its label. Every label has a leader line that ends on the part it names. Timelines, cycles and flowcharts can use the full width instead.
+- LINES NEVER CROSS TEXT, and text never sits on another shape's outline. Objects do not overlap unless one is truly inside the other. Keep everything inside x 20-780, y 20-480. Each figure stands alone (the board is cleared between figures).
+- Before you finish each figure, check: Does it fill the board? Is the main object big and recognizable? Is every label's line touching the right part? Does any text run off the board or cross a line? Fix these first.
 
 Always respond by calling the give_board tool.`;
 
@@ -145,7 +160,7 @@ async function streamClaude(system, user, maxTokens, model, onText) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model, max_tokens: maxTokens, system, stream: true, thinking: { type: "disabled" }, messages: [{ role: "user", content: user }] })
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, stream: true, ...(/haiku/i.test(model) ? { thinking: { type: "disabled" } } : {}), messages: [{ role: "user", content: user }] })
   });
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error("api_" + r.status + " " + t.slice(0, 200)); }
   const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
@@ -202,12 +217,34 @@ async function streamBoard(res, isGet, user, maxSteps, kidsLimits) {
       start(); res.write(JSON.stringify(step) + "\n"); count++;
     }
   };
-  for (let attempt = 0; attempt < 2 && !wrote && !none; attempt++) {
-    text = "";
-    try { await streamClaude(SYSTEM_BOARD_STREAM, user, 8000, BOARD_MODEL, t => { text += t; flush(); }); flush(); lastErr = null; }
-    catch (e) { lastErr = e; console.error("drawing attempt", attempt + 1, "failed:", e.message); }
-    if (wrote || none) break;
-  }
+  // All the figures are drawn at the same time, one call each, and sent to the page in order as soon as
+  // each one is ready (Fig. 1 first). If the stronger model fails on a figure, the fast model tries once.
+  const n = Math.min(maxSteps, 5);
+  const results = new Array(n).fill(undefined); let next = 0;
+  const emit = () => {
+    while (next < n && results[next] !== undefined) {
+      const step = results[next]; next++;
+      if (!step || !step.svg) continue;
+      if (kidsLimits) { step.legend = step.legend.slice(0, 8); step.formulas = step.formulas.slice(0, 3); delete step.title; }
+      start(); res.write(JSON.stringify(step) + "\n"); count++;
+    }
+  };
+  const drawOne = async k => {
+    const one = `${user}\n\nDraw ONLY Fig. ${k + 1} of ${n}${n > 1 ? `, the one that illustrates section ${k + 1}` : ""}. Title it "Fig. ${k + 1}: ...". Write exactly one === STEP block for it and nothing else.`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const model = attempt === 0 ? BOARD_MODEL : "claude-haiku-5-5";
+      let t = "";
+      try {
+        await streamClaude(SYSTEM_BOARD_STREAM, one, /haiku/i.test(model) ? 7000 : 12000, model, x => { t += x; });
+        if (t.includes("=== NONE")) { none = true; return null; }
+        const a = t.indexOf("=== STEP"), b = t.indexOf("=== END", a);
+        if (a >= 0 && b > a) { const step = parseBlock(t.slice(a + 8, b)); if (step.svg) return step; }
+        if (a >= 0) { const step = parseBlock(t.slice(a + 8)); if (step.svg) return step; }   // cut off before its end mark
+      } catch (e) { lastErr = e; console.error("figure", k + 1, "attempt", attempt + 1, "failed:", e.message); }
+    }
+    return null;
+  };
+  await Promise.all(Array.from({ length: n }, (_, k) => drawOne(k).then(step => { results[k] = step; if (!none) emit(); })));
   if (wrote) { res.write(JSON.stringify({ done: true }) + "\n"); return res.end(); }
   if (none || !lastErr) {
     res.setHeader("Cache-Control", isGet && none ? "public, s-maxage=2592000" : "no-store");

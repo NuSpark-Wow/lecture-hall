@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
 
   const text = String((req.body || {}).text || "").trim().slice(0, 4000);
   if (!text) return res.status(400).json({ error: "empty" });
-  const speed = ({ slow: 0.85, fast: 1.15 })[(req.body || {}).speed] || 1.0;   // Slower, Normal, Faster
+  const speed = ({ slow: 0.75, fast: 1.2 })[(req.body || {}).speed] || 1.0;   // Slower, Normal, Faster
   const ck = who + "|" + speed + "|" + text;
   if (cache.has(ck)) return res.json(cache.get(ck));
 
