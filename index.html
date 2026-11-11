@@ -883,20 +883,50 @@ function tidyText(g){
       if (dy && n.hasAttribute("y")) n.setAttribute("y", (parseFloat(n.getAttribute("y")) || 0) + dy);
     });
   };
+  // 1) words that belong in a small box (a pill or label box) are centered inside it and shrunk if too wide
+  const boxes = [...g.querySelectorAll("rect")].map(r => { try { const b = r.getBBox(); return b.width > 20 && b.height > 18 && b.height <= 130 && b.width <= 640 ? b : null; } catch(e) { return null; } }).filter(Boolean);
+  const boxed = new Set();
   texts.forEach(el => {
     let b; try { b = el.getBBox(); } catch(e) { return; }
     if (!b.width) return;
+    const cx = b.x + b.width / 2;
+    const home = boxes.filter(r => (Math.min(b.y + b.height, r.y + r.height) - Math.max(b.y, r.y)) > b.height * 0.35 &&
+        ((b.x >= r.x - 8 && b.x + b.width <= r.x + r.width + 8) || Math.abs(cx - (r.x + r.width / 2)) < 14) && !r._taken)
+      .sort((a, c) => a.width * a.height - c.width * c.height)[0];
+    if (!home) return;
+    home._taken = true; boxed.add(el);
+    if (b.width > home.width - 14) {   // too wide for its box: make the words a little smaller
+      const fs = parseFloat(el.getAttribute("font-size")) || 28;
+      el.setAttribute("font-size", Math.max(16, Math.floor(fs * (home.width - 18) / b.width)));
+      b = el.getBBox();
+    }
+    const dy = (home.y + home.height / 2) - (b.y + b.height / 2);
+    const dx = (home.x + home.width / 2) - (b.x + b.width / 2);
+    move(el, Math.abs(dx) > 6 ? dx : 0, Math.abs(dy) > 2 ? dy : 0);
+  });
+  const edges = [];
+  g.querySelectorAll("rect").forEach(r => { try { const b = r.getBBox(); if (b.height > 130 || b.width > 640) edges.push({ x: b.x, y: b.y - 3, width: b.width, height: 6 }, { x: b.x, y: b.y + b.height - 3, width: b.width, height: 6 }); } catch(e) {} });
+  // 2) the small boxes are obstacles that loose words must not sit on
+  boxes.forEach(r => { if ([...boxed].some(el => { try { const b = el.getBBox(); return b.x >= r.x - 4 && b.x + b.width <= r.x + r.width + 4; } catch(e) { return false; } })) placed.push(r); });
+  texts.forEach(el => {
+    let b; try { b = el.getBBox(); } catch(e) { return; }
+    if (!b.width) return;
+    if (boxed.has(el)) return;   // already centered in its box
     if (b.x < 8) { move(el, 8 - b.x, 0); }
     else if (b.x + b.width > 792) { move(el, 792 - b.x - b.width, 0); }
     b = el.getBBox();
     if (b.y + b.height > 494) move(el, 0, 494 - b.y - b.height);   // pull words back onto the board
     else if (b.y < 6) move(el, 0, 6 - b.y);
-    for (let n = 0; n < 8; n++) {
-      b = el.getBBox();
-      const o = placed.find(p => hit(b, p)); if (!o) break;
-      let dy = o.y + o.height + pad + 2 - b.y;             // try just below the word it bumps into
-      if (b.y + dy + b.height > 496) dy = o.y - pad - 2 - b.height - b.y;   // no room below: go above
-      move(el, 0, dy);
+    b = el.getBBox();
+    if (placed.some(p => hit(b, p))) {
+      // bumping into another word or a label box: try spots just above or below each one, and take the
+      // nearest spot that is free and still on the board; if there is none, shrink the words a little and stay
+      const at = dy => ({ x: b.x, y: b.y + dy, width: b.width, height: b.height });
+      const ok = t => t.y >= 4 && t.y + t.height <= 496 && !placed.some(p => hit(t, p)) && !edges.some(p => hit(t, p));
+      let best = null;
+      for (let d = 3; d <= 110 && best === null; d += 3) { if (ok(at(d))) best = d; else if (ok(at(-d))) best = -d; }   // nearest free spot up or down
+      if (best !== null) move(el, 0, best);
+      else { const fs = parseFloat(el.getAttribute("font-size")) || 26; el.setAttribute("font-size", Math.max(16, Math.round(fs * 0.8))); }
     }
     try { placed.push(el.getBBox()); } catch(e) {}
   });
