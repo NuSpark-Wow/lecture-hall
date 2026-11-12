@@ -1330,6 +1330,20 @@ async function loadImage(q){
 }
 
 /* ---------- welcome ---------- */
+// The intro waits until the board is actually on screen, so it isn't missed while someone reads the top of the page.
+var boardSeen = false, boardInView = true, introQueue = null;
+(function(){
+  const el = document.getElementById("svg");
+  if (!el || !("IntersectionObserver" in window)) { boardSeen = true; return; }
+  boardInView = false;
+  try {
+    new IntersectionObserver(es => { es.forEach(e => {
+      boardInView = e.isIntersecting && e.intersectionRatio >= 0.45;
+      if (boardInView) { boardSeen = true; if (introQueue) { const f = introQueue; introQueue = null; f(); } }
+    }); }, { threshold: [0, 0.45, 0.8] }).observe(el);
+  } catch(e) { boardSeen = true; boardInView = true; }
+})();
+function whenBoardSeen(fn){ if (boardSeen) fn(); else introQueue = fn; }
 function welcome(){
   buildBoard([{ title: "", caption: "Ask anything.", svg:
     "<text x='400' y='95' text-anchor='middle' font-family='Kalam' font-size='34' fill='#f5f3ea'>Welcome to</text>" +
@@ -1340,7 +1354,7 @@ function welcome(){
     "<ellipse cx='400' cy='300' rx='90' ry='32' fill='none' stroke='#ffa3b1' stroke-width='3' transform='rotate(60 400 300)'/>" +
     "<ellipse cx='400' cy='300' rx='90' ry='32' fill='none' stroke='#a8e6a3' stroke-width='3' transform='rotate(-60 400 300)'/>" +
     "<text x='400' y='445' text-anchor='middle' font-family='Kalam' font-size='40' fill='#f5f3ea'>Ask anything.</text>" }]);
-  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => { if (liveBoard || lesson || busy) return; manual = true; showFigure(0); });
+  (document.fonts ? document.fonts.ready : Promise.resolve()).then(() => whenBoardSeen(() => { if (liveBoard || lesson || busy) return; manual = true; showFigure(0); }));
 }
 
 /* ---------- start ---------- */
