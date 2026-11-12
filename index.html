@@ -190,6 +190,8 @@ button{font-family:inherit;cursor:pointer}
 .rategrp #rateVal{min-width:92px;font-size:13px!important;padding:6px 8px!important}
 .veil{filter:blur(5px);opacity:.45;pointer-events:none;user-select:none;transition:filter .3s,opacity .3s}
 .studybar #bCont.ready:not(:disabled){animation:readyGlow 1.6s ease-in-out infinite;border-color:#a3e635}
+#replayAll{font-weight:800}
+#replayAll:disabled{opacity:.4}
 </style>
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
@@ -210,7 +212,8 @@ button{font-family:inherit;cursor:pointer}
         <button id="vMute" aria-label="Mute: no voice, read the words">🔇 Mute</button>
       </div>
       <div class="toggle" role="group" aria-label="Start over">
-        <button id="startOver" title="Stop and start over with a new topic">⟲ Start over</button>
+        <button id="replayAll" title="Play this lesson again from the beginning" disabled>⏮ Replay</button>
+        <button id="startOver" title="Stop and clear everything to ask about a new topic">✕ New topic</button>
       </div>
       <div class="toggle" role="group" aria-label="Voice speed" style="display:none">
         <button id="sSlow">🐢 Slower</button>
@@ -611,6 +614,21 @@ function startNarration(){
   if (startGateOn()) { markStartReady(); return; }   // first lesson: wait for the ▶ Start tap
   beginNarration();
 }
+/* ---------- ⏮ Replay: this lesson again from the first picture, nothing re-made ---------- */
+function replayLesson(){
+  if (!lesson || !groups.length || (typeof silentMode !== "undefined" && silentMode)) return;
+  unlock(); stopVoice();
+  if (typeof boardHeld !== "undefined") boardHeld = false;
+  if (typeof flipStopped !== "undefined") flipStopped = true;
+  narrStarted = false; lastCi = -1; manual = false; firstStartDone = true; startReady = false;
+  if ($("read")) $("read").classList.remove("veil");
+  showFigure(0);
+  if (!audioP && typeof prepareAudio === "function") audioP = prepareAudio();
+  beginNarration();
+  if (typeof toBoard === "function") toBoard();
+  if (typeof studyUI === "function") studyUI();
+}
+if ($("replayAll")) $("replayAll").onclick = () => replayLesson();
 function beginNarration(){
   if (narrStarted || silentMode) return;
   narrStarted = true; clearTimeout(narrTimer);
@@ -1053,6 +1071,7 @@ var boardHeld = false;   // the figures are frozen (also when the talking is ove
 function studyUI(){
   const bp = $("bPause"), bc = $("bCont"), be = $("bExplain"); if (!bp) return;
   $("studybar").classList.toggle("hide", !lesson);
+  if ($("replayAll")) $("replayAll").disabled = !lesson || !groups.length || startGateOn();
   const flipping = !speaking && groups.length > 0 && shown < groups.length && !manual;
   bp.disabled = !((speaking && !paused) || (flipping && !boardHeld));
   bc.disabled = !(paused || boardHeld);
