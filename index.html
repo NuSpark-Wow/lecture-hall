@@ -188,6 +188,8 @@ button{font-family:inherit;cursor:pointer}
 .rategrp input{width:130px;accent-color:#c8962c;height:28px}
 .rategrp .rl{font-size:18px}
 .rategrp #rateVal{min-width:92px;font-size:13px!important;padding:6px 8px!important}
+.veil{filter:blur(5px);opacity:.45;pointer-events:none;user-select:none;transition:filter .3s,opacity .3s}
+.studybar #bCont.ready:not(:disabled){animation:readyGlow 1.6s ease-in-out infinite;border-color:#a3e635}
 </style>
 <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
 <script defer src="/_vercel/insights/script.js"></script>
@@ -579,7 +581,37 @@ function addFig(f){
   else syncBoard(lastCi);
 }
 // The lecture waits for Fig. 1, then each figure appears when the professor reaches its section
+/* ---------- ▶ Start: the first lesson of a visit waits for the visitor's tap once the first picture is up ---------- */
+// After that first tap, every later lesson starts by itself the moment its first picture appears.
+var firstStartDone = false, startReady = false;
+function startGateOn(){
+  return !firstStartDone && !narrStarted && !(typeof silentMode !== "undefined" && silentMode) && !!lesson && lesson.type === "lecture" && (typeof boardOff === "undefined" || !boardOff);
+}
+function startLabels(){ return ["▶ Start", "⏳ Drawing the first picture…"]; }
+function ding(){
+  if (typeof voicePref !== "undefined" && voicePref === "mute") return;
+  try { unlock(); const o = ctx.createOscillator(), gn = ctx.createGain(), t0 = ctx.currentTime;
+    o.type = "sine"; o.frequency.setValueAtTime(880, t0); o.frequency.setValueAtTime(1320, t0 + 0.12);
+    gn.gain.setValueAtTime(0.0001, t0); gn.gain.exponentialRampToValueAtTime(0.22, t0 + 0.02); gn.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+    o.connect(gn).connect(ctx.destination); o.start(t0); o.stop(t0 + 0.5); } catch(e) {}
+}
+function veilText(){ if (startGateOn() && $("read")) $("read").classList.add("veil"); if (typeof studyUI === "function") studyUI(); }
+function markStartReady(){
+  if (!startReady) { startReady = true; ding(); }
+  if ($("thinkText")) $("thinkText").textContent = startLabels()[0].replace("▶ ", "") + " ⬇";
+  if (typeof studyUI === "function") studyUI();
+}
+function doStart(){
+  firstStartDone = true; startReady = false;
+  if ($("read")) $("read").classList.remove("veil");
+  beginNarration();
+  if (typeof studyUI === "function") studyUI();
+}
 function startNarration(){
+  if (startGateOn()) { markStartReady(); return; }   // first lesson: wait for the ▶ Start tap
+  beginNarration();
+}
+function beginNarration(){
   if (narrStarted || silentMode) return;
   narrStarted = true; clearTimeout(narrTimer);
   const my = reqId;
@@ -623,7 +655,7 @@ async function ask(text, context, opts){
 
   // the lecture text comes first; then each section gets its own figure
   boardOff = false; lastReveal = 0; clearTimeout(pumpTimer); clearTimeout(narrTimer); figs = [];
-  narrStarted = false; lastCi = -1; audioP = null; silentMode = !!opts.silent;
+  narrStarted = false; startReady = false; lastCi = -1; audioP = null; silentMode = !!opts.silent;
   buildBoard([]); liveBoard = true; boardDone = false;
 
   let data = null, reason = "N0";
@@ -652,13 +684,14 @@ async function ask(text, context, opts){
   lastQuestion = (!context && !opts.more && !opts.image) ? question : "";
   if (opts.image) { clearPhoto(); opts.boardTitle = data.title || "the picture"; }
   lesson = data; render(opts);
+  veilText();
   if (opts.scroll) toBoard();
   $("hint").textContent = "Ask another question anytime.";
   track("lecture", { topic: String(data.title || "").slice(0, 80), depth, type: data.type, course: course ? "yes" : "no" });
 
   if (data.type !== "lecture") { boardOff = true; $("thinking").classList.remove("on"); return; }
   $("thinkText").textContent = "Drawing Fig. 1..."; $("thinking").classList.add("on");
-  if (!silentMode) narrTimer = setTimeout(startNarration, 15000);   // safety valve if a figure is slow
+  if (!silentMode) narrTimer = setTimeout(startNarration, 45000);   // safety valve if a figure is slow
   const parts = (data.answer || []).map(x => typeof x === "string" ? { heading: "", text: x } : x);
   const a = parts.map(x => ((x.heading ? x.heading + ": " : "") + (x.text || "")).trim()).filter(Boolean).slice(0, 5).map(x => x.slice(0, 900)).join("\n");
   let total = 0;
@@ -1019,6 +1052,7 @@ $("pause").onclick = () => { if (!speaking) return; if (paused) unpause(); else 
 var boardHeld = false;   // the figures are frozen (also when the talking is over and they are flipping on their own)
 function studyUI(){
   const bp = $("bPause"), bc = $("bCont"), be = $("bExplain"); if (!bp) return;
+  $("studybar").classList.toggle("hide", !lesson);
   const flipping = !speaking && groups.length > 0 && shown < groups.length && !manual;
   bp.disabled = !((speaking && !paused) || (flipping && !boardHeld));
   bc.disabled = !(paused || boardHeld);
@@ -1027,6 +1061,7 @@ function studyUI(){
   bc.textContent = "▶ Continue";
   if ((paused || boardHeld) && readyWhilePaused) { const sm = document.createElement("small"); sm.textContent = "next figure ready"; bc.appendChild(sm); }
   be.disabled = shown === 0;
+  if (startGateOn()) { const sl = startLabels(); bc.disabled = !startReady; bc.textContent = startReady ? sl[0] : sl[1]; bc.classList.toggle("ready", startReady); bc.classList.remove("on"); bp.disabled = true; bp.classList.remove("on"); }
 }
 $("bPause").onclick = () => {
   unlock();
@@ -1035,6 +1070,7 @@ $("bPause").onclick = () => {
   studyUI();
 };
 $("bCont").onclick = () => {
+  if (startGateOn()) { unlock(); if (startReady) doStart(); return; }
   unlock();
   const wasHeld = boardHeld; boardHeld = false;
   if (paused) unpause();
