@@ -1409,5 +1409,36 @@ if (sq) { if (params.get("d") === "quick") setDepth("quick"); $("q").value = sq;
   }).observe(root);
 })();
 </script>
+
+<script>
+/* House rule: no sample text inside input boxes (it gets cut off on phones).
+   Plain prompts are removed; helpful examples move to a small line just above the box. */
+(function(){
+  var DROP=/^(ask anything|pregunta lo que quieras|type your reply|your answer|tu respuesta|your word|first thing|second thing|third thing|type what.?s on your mind|ask the table a question|paste a web address)/i;
+  var css=document.createElement('style');
+  css.textContent='.ph-hint{font-size:13px;line-height:1.35;opacity:.78;margin:4px 0 6px;text-align:left}';
+  document.head.appendChild(css);
+  function fix(el){
+    var t=(el.getAttribute('placeholder')||'').trim();
+    if(!t) return;
+    el.setAttribute('placeholder','');
+    if(DROP.test(t)){ if(el._phHint){ el._phHint.remove(); el._phHint=null; } return; }
+    var h=el._phHint;
+    if(!h || !h.isConnected){
+      h=document.createElement('div'); h.className='ph-hint';
+      var at=el, p=el.parentNode;
+      if(p && p.children.length>1){ var d=getComputedStyle(p).display; if(/flex|grid/.test(d)) at=p; }
+      at.parentNode.insertBefore(h,at); el._phHint=h;
+    }
+    h.textContent=t;
+  }
+  function scan(root){ if(root.querySelectorAll) root.querySelectorAll('input[placeholder],textarea[placeholder]').forEach(fix); }
+  new MutationObserver(function(ms){ ms.forEach(function(m){
+    if(m.type==='attributes') fix(m.target);
+    else m.addedNodes.forEach(function(n){ if(n.nodeType===1){ if(n.matches && n.matches('input[placeholder],textarea[placeholder]')) fix(n); scan(n); } });
+  }); }).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['placeholder']});
+  scan(document);
+})();
+</script>
 </body>
 </html>
