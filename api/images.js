@@ -51,6 +51,7 @@ async function fromNasa(q) {
 }
 
 module.exports = async (req, res) => {
+  if (!(await require("./_lwgate")(req, res, "lecture-hall"))) return;
   if (!allowedRequest(req)) return blockRequest(res);
   const q = String(req.query.q || "").replace(/[^\w\s-]/g, " ").trim().slice(0, 60);
   if (!q || BAD.test(q)) return res.json({ image: null });
