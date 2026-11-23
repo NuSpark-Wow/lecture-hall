@@ -161,6 +161,8 @@ button{font-family:inherit;cursor:pointer}
 .img-card img{width:100%;max-height:280px;object-fit:contain;border-radius:10px;background:#ece6da;display:block}
 .credit{font-family:Inter,sans-serif !important;font-size:12px !important;color:var(--soft);margin-top:8px !important}
 .fact{border-left:5px solid var(--gold)}
+.guest{border-left:5px solid #7dd3fc}
+.guest .gbtn{margin-top:10px;background:#7dd3fc;color:#0b1220;border:0;border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer}
 .myth{border-left:5px solid var(--red)}
 
 .deeper{margin-top:16px}
@@ -355,6 +357,7 @@ button{font-family:inherit;cursor:pointer}
         <button class="btn hide" id="stop">⏹ Stop</button>
         <button class="btn" id="share">🔗 Share</button>
         <button class="btn" id="pdf">📄 Save as PDF</button>
+        <button class="btn" id="notes">📝 Lecture Notes</button>
         <div class="thumbs" id="thumbs"><span id="helpful">Helpful?</span><button id="up" aria-label="Yes">👍</button><button id="down" aria-label="No">👎</button></div>
       </div>
     </div>
@@ -363,6 +366,7 @@ button{font-family:inherit;cursor:pointer}
       <div class="card img-card hide" id="imgCard"><h3>What it looks like</h3><img id="img" alt=""><p class="credit" id="credit"></p></div>
       <div class="card fact hide" id="factCard"><h3>Surprising fact</h3><p id="fact"></p></div>
       <div class="card myth hide" id="mythCard"><h3>Common misconception</h3><p id="myth"></p></div>
+      <div class="card guest hide" id="guestCard"><h3 id="guestH">Guest Professor</h3><p id="guestT"></p><button class="gbtn" id="guestPlay" type="button">🔊 Hear the guest</button></div>
     </div>
   </div>
 
@@ -829,18 +833,19 @@ function render(opts){
     read.appendChild(el); offset += a.text.length + 1;
   });
   $("playrow").classList.remove("hide");
-  $("thumbs").classList.toggle("hide", !isLec); $("share").classList.toggle("hide", !isLec); $("pdf").classList.toggle("hide", !isLec);
+  $("thumbs").classList.toggle("hide", !isLec); $("share").classList.toggle("hide", !isLec); $("pdf").classList.toggle("hide", !isLec); $("notes").classList.toggle("hide", !isLec);
   $("helpful").textContent = "Helpful?"; $("up").disabled = false; $("down").disabled = false;
 
   if (!isLec) { boardOff = true; clearTimeout(pumpTimer); figs = []; buildBoard([{ title: "", caption: L.type === "help" ? "You matter." : "Ask another question.", svg: blankCard() }]); showFigure(0); }
 
-  ["side","termsCard","imgCard","factCard","mythCard","deepCard"].forEach(id => $(id).classList.add("hide"));
+  ["side","termsCard","imgCard","factCard","mythCard","guestCard","deepCard"].forEach(id => $(id).classList.add("hide"));
   if (isLec) {
     const tb = $("terms"); tb.innerHTML = "";
     (L.terms || []).forEach(x => { if (!x || !x.word) return; const d = document.createElement("div"); d.innerHTML = "<b></b>: <span></span>"; d.querySelector("b").textContent = x.word; d.querySelector("span").textContent = x.meaning || ""; tb.appendChild(d); });
     if (tb.children.length) { $("termsCard").classList.remove("hide"); $("side").classList.remove("hide"); }
     if (L.surprising) { $("fact").textContent = L.surprising; $("factCard").classList.remove("hide"); $("side").classList.remove("hide"); }
     if (L.misconception) { $("myth").textContent = L.misconception; $("mythCard").classList.remove("hide"); $("side").classList.remove("hide"); }
+    if (L.guest && L.guest.text) { $("guestH").textContent = "Guest Professor" + (L.guest.field ? ": the " + L.guest.field : ""); $("guestT").textContent = L.guest.text; $("guestCard").classList.remove("hide"); $("side").classList.remove("hide"); }
     if (L.image_query) loadImage(L.image_query);
 
     const row = $("deeper"); row.innerHTML = "";
@@ -914,6 +919,47 @@ $("share").onclick = async () => {
   try { if (navigator.share) { await navigator.share({ title: (lesson && lesson.title) || "The Lecture Hall", url }); return; } } catch(e) { return; }
   try { await navigator.clipboard.writeText(url); toast("Link copied. Paste it anywhere to share."); }
   catch(e) { window.prompt("Copy this link to share:", url); }
+};
+// Guest Professor: a second voice (the other one from the lecturer) reads the guest's drop-in.
+let guestAudio = null;
+$("guestPlay").onclick = async () => {
+  const L = lesson; if (!L || !L.guest || !L.guest.text) return;
+  if (guestAudio && !guestAudio.paused) { guestAudio.pause(); guestAudio = null; $("guestPlay").textContent = "🔊 Hear the guest"; return; }
+  try { pauseVoice(); } catch(e) {}
+  $("guestPlay").textContent = "⏳ The guest is stepping in…";
+  try {
+    const r = await fetch("/api/speak", { method:"POST", headers:{ "content-type":"application/json" }, body: JSON.stringify({ text: L.guest.text, voice: voicePref === "woman" ? "man" : "woman", speed: speedPref }) });
+    const d = r.ok ? await r.json() : null;
+    if (!d || !d.audio) throw new Error("no audio");
+    guestAudio = new Audio("data:audio/mpeg;base64," + d.audio);
+    guestAudio.onended = () => { $("guestPlay").textContent = "🔊 Hear the guest again"; guestAudio = null; };
+    $("guestPlay").textContent = "⏹ Stop the guest";
+    guestAudio.play();
+  } catch(e) {
+    try { const u = new SpeechSynthesisUtterance(L.guest.text); speechSynthesis.speak(u); } catch(e2) {}
+    $("guestPlay").textContent = "🔊 Hear the guest";
+  }
+};
+// Lecture Notes: a one-page study sheet (key terms, the main diagram, a short summary) to print or save.
+function escNotes(t){ return String(t || "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" })[c]); }
+$("notes").onclick = () => {
+  const L = lesson; if (!L) return;
+  track("notes", { topic: String(L.title || "").slice(0, 80) });
+  const secs = (L.answer || []);
+  const summary = secs.slice(0, 3).map(a => (a.text.match(/[^.!?]+[.!?]/) || [a.text])[0].trim());
+  const fig = figs && figs[0] && figs[0].svg ? '<svg viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" style="width:100%;background:#1d2b25;border-radius:10px">' + figs[0].svg + '</svg><p class="cap">' + escNotes(figs[0].caption || figs[0].title || "") + '</p>' : "";
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Lecture Notes: ' + escNotes(L.title) + '</title><style>body{font-family:Georgia,serif;max-width:760px;margin:28px auto;padding:0 20px;color:#1b1b1b}h1{font-size:26px;margin:0 0 4px}.sub{color:#666;font-size:13px;margin-bottom:18px}h2{font-size:17px;border-bottom:2px solid #1d2b25;padding-bottom:3px;margin:20px 0 8px}li{margin:5px 0;line-height:1.45}.cap{font-size:12px;color:#555;text-align:center;margin:4px 0 0}.foot{margin-top:26px;font-size:11px;color:#777;border-top:1px solid #ddd;padding-top:8px}button{margin:10px 0;padding:8px 16px;font-size:15px}@media print{button{display:none}}</style></head><body>' +
+    '<button onclick="window.print()">🖨 Print or save as PDF</button>' +
+    '<h1>' + escNotes(L.title) + '</h1><div class="sub">Lecture Notes · The Lecture Hall · nusparklearnwow.com</div>' +
+    '<h2>Summary in 3 lines</h2><ol>' + summary.map(x => '<li>' + escNotes(x) + '</li>').join("") + '</ol>' +
+    ((L.terms || []).length ? '<h2>Key terms</h2><ul>' + L.terms.map(t => '<li><b>' + escNotes(t.word) + ':</b> ' + escNotes(t.meaning) + '</li>').join("") + '</ul>' : "") +
+    (fig ? '<h2>The main diagram</h2>' + fig : "") +
+    (L.surprising ? '<h2>Remember this</h2><p>' + escNotes(L.surprising) + '</p>' : "") +
+    ((L.deeper || []).length ? '<h2>Questions to explore next</h2><ul>' + L.deeper.map(q => '<li>' + escNotes(q) + '</li>').join("") + '</ul>' : "") +
+    '<div class="foot">AI can make mistakes, so double-check anything important. Made with The Lecture Hall at nusparklearnwow.com.</div></body></html>';
+  const w = window.open("", "_blank");
+  if (!w) { toast("Allow pop-ups to open your Lecture Notes."); return; }
+  w.document.open(); w.document.write(html); w.document.close();
 };
 $("pdf").onclick = () => { track("pdf", { topic: String(lesson && lesson.title || "").slice(0, 80) }); window.print(); };
 window.addEventListener("beforeprint", () => {
