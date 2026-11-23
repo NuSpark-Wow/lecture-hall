@@ -409,7 +409,7 @@ module.exports = async (req, res) => {
   ] : user;
   try {
     lec = await withRetry(async () => {
-      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, content, 4000, x => Array.isArray(x.answer)));
+      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, content, 5000, x => Array.isArray(x.answer)));
       if (!j) throw new Error("bad_shape");
       return j;
     }, 30000);
