@@ -55,6 +55,7 @@ OTHER FIELDS (lectures only):
 - "misconception": one common misconception and the truth (1-2 sentences), or "".
 - "image_query": 2-4 plain, literal search words for a real photo of what the topic looks like, or "" if a photo would not help.
 - "deeper": exactly 3 smart follow-up questions.
+- "guest": a GUEST PROFESSOR from a different field who drops in with a fresh angle on the same topic. "field" is the guest's field (for example "Historian", "Economist", "Biologist", "Engineer"), different from the main lecture's angle. "text" is what the guest says: 2-3 lively spoken sentences (under 70 words), first person, starting with something like "Here's how a historian sees it." Same accuracy rules.
 
 For redirect, decline: fill only type, title, answer.
 
@@ -117,6 +118,7 @@ const LECTURE_TOOL = {
     answer: { type: "array", items: { type: "object", properties: { heading: { type: "string" }, text: { type: "string" } } } },
     terms: { type: "array", items: { type: "object", properties: { word: { type: "string" }, meaning: { type: "string" } } } },
     surprising: { type: "string" }, misconception: { type: "string" }, image_query: { type: "string" },
+    guest: { type: "object", properties: { field: { type: "string" }, text: { type: "string" } } },
     deeper: { type: "array", items: { type: "string" } }
   }, required: ["type", "title", "answer"] }
 };
@@ -407,7 +409,7 @@ module.exports = async (req, res) => {
   ] : user;
   try {
     lec = await withRetry(async () => {
-      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, content, 4000, x => Array.isArray(x.answer)));
+      const j = normalize(await callTool(SYSTEM_LECTURE, LECTURE_TOOL, content, 5000, x => Array.isArray(x.answer)));
       if (!j) throw new Error("bad_shape");
       return j;
     }, 30000);
